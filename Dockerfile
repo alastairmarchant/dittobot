@@ -37,7 +37,7 @@ EXPOSE 3000
 VOLUME ["/data"]
 
 ENV DITTOBOT_STORE__TYPE=local
-ENV DITTOBOT_STORE__FILE_PATH=/data
+ENV DITTOBOT_STORE__PATH=/data
 
 RUN npm run build
 
@@ -70,7 +70,7 @@ EXPOSE 3000
 VOLUME ["/data"]
 
 ENV DITTOBOT_STORE__TYPE=local
-ENV DITTOBOT_STORE__FILE_PATH=/data
+ENV DITTOBOT_STORE__PATH=/data
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "start"]

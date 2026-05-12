@@ -1,12 +1,16 @@
 import type { ProbotOctokit } from "probot"
-import { parse as parseYaml } from 'yaml'
-import { validate as validateVersion, compare, compareVersions } from 'compare-versions'
+import { parse as parseYaml } from "yaml"
+import {
+    validate as validateVersion,
+    compare,
+    compareVersions,
+} from "compare-versions"
 import type { ApprovedVersions } from "./store.js"
 import ApprovalStore, { getStoreProvider } from "./store.js"
 import type { components as RestComponents } from "@octokit/openapi-types"
 import type { components as WebhookComponents } from "@octokit/openapi-webhooks-types"
 
-export interface Dependency {
+export type Dependency = {
     name: string
     version: string
     ecosystem: string
@@ -14,49 +18,83 @@ export interface Dependency {
 }
 
 type WebhookPrPayload = WebhookComponents["schemas"][
-    "webhook-pull-request-opened"
+    | "webhook-pull-request-opened"
     | "webhook-pull-request-reopened"
     | "webhook-pull-request-synchronize"
     | "webhook-pull-request-closed"
-    | "webhook-pull-request-review-submitted"
-]["pull_request"]
+    | "webhook-pull-request-review-submitted"]["pull_request"]
 type RestPrPayload = RestComponents["schemas"]["pull-request-simple"]
 type PrPayload = WebhookPrPayload | RestPrPayload
 
-type Repository = WebhookComponents["schemas"]["repository-webhooks"] | RestComponents["schemas"]["full-repository"]
+type Repository =
+    | WebhookComponents["schemas"]["repository-webhooks"]
+    | RestComponents["schemas"]["full-repository"]
 
-export const isDepedabotPr = (pr: PrPayload) => {
-    return pr.user?.login === "dependabot[bot]" || pr.user?.login === "dependabot"
+export const isDepedabotPr = (pr: PrPayload): boolean => {
+    return (
+        pr.user?.login === "dependabot[bot]" || pr.user?.login === "dependabot"
+    )
 }
 
-export const extractPrDependencies = async (pr: PrPayload, octokit: ProbotOctokit, owner: string): Promise<Dependency[]> => {
+type DependabotYamlData = {
+    "updated-dependencies"?: {
+        "dependency-name": string
+        "dependency-version": string
+        "dependency-type": "direct" | "indirect"
+    }[]
+}
+
+export const extractPrDependencies = async (
+    pr: PrPayload,
+    octokit: ProbotOctokit,
+    owner: string,
+): Promise<Dependency[]> => {
     const branchName = pr.head.ref
     const commits = await octokit.rest.pulls.listCommits({
         owner,
         repo: pr.base.repo.name,
-        pull_number: pr.number
+        pull_number: pr.number,
     })
 
-    const firstCommitMessage = commits.data[0].commit.message
-    const yamlFragment = firstCommitMessage.match(/^-{3}\n(?<dependencies>[\S|\s]*?)\n^\.{3}\n/m)
+    const firstCommitMessage = commits.data[0]?.commit.message
+    if (!firstCommitMessage) {
+        return []
+    }
+
+    const yamlFragment = /^-{3}\n(?<dependencies>[\S|\s]*?)\n^\.{3}\n/m.exec(
+        firstCommitMessage,
+    )
 
     const dependencies: Dependency[] = []
 
-    if (yamlFragment?.groups && branchName.startsWith('dependabot')) {
-        const data = parseYaml(yamlFragment.groups.dependencies)
+    if (yamlFragment?.groups && branchName.startsWith("dependabot")) {
+        if (!yamlFragment.groups.dependencies) {
+            return dependencies
+        }
 
-        if (!data['updated-dependencies']) {
+        const data = parseYaml(
+            yamlFragment.groups.dependencies,
+        ) as DependabotYamlData
+
+        if (!data["updated-dependencies"]) {
             return dependencies
         }
 
         const delim = branchName[10]
+        if (!delim) {
+            return dependencies
+        }
+
         const ecosystem = branchName.split(delim)[1]
 
+        if (!ecosystem) {
+            return dependencies
+        }
 
-        for (const dep of data['updated-dependencies']) {
+        for (const dep of data["updated-dependencies"]) {
             dependencies.push({
-                name: dep['dependency-name'],
-                version: dep['dependency-version'],
+                name: dep["dependency-name"],
+                version: dep["dependency-version"],
                 type: dep["dependency-type"],
                 ecosystem,
             })
@@ -66,7 +104,10 @@ export const extractPrDependencies = async (pr: PrPayload, octokit: ProbotOctoki
     return dependencies
 }
 
-export const versionIsApproved = (approvedVersions: ApprovedVersions, dep: Dependency): boolean => {
+export const versionIsApproved = (
+    approvedVersions: ApprovedVersions,
+    dep: Dependency,
+): boolean => {
     const packageVersions = approvedVersions[dep.ecosystem]?.[dep.name]
 
     if (!packageVersions) {
@@ -81,7 +122,10 @@ export const versionIsApproved = (approvedVersions: ApprovedVersions, dep: Depen
         return false
     }
 
-    const maxApprovedVersion = Object.keys(packageVersions).filter(v => validateVersion(v)).sort(compareVersions).pop()
+    const maxApprovedVersion = Object.keys(packageVersions)
+        .filter((v) => validateVersion(v))
+        .sort(compareVersions)
+        .pop()
 
     if (!maxApprovedVersion) {
         return false
@@ -99,20 +143,26 @@ const buildApprovalComment = (approvedDeps: Dependency[]): string => {
     const approval_store_link = ""
     const lines = [
         "## :robot: Auto-approved by DittoBot\n",
-        "All dependency versions in this PR have been previously reviewed and approved:\n"
+        "All dependency versions in this PR have been previously reviewed and approved:\n",
     ]
     for (const dep of approvedDeps) {
         lines.push(`- \`${dep.name}\` -> \`${dep.version}\` (${dep.ecosystem})`)
     }
 
     lines.push(
-        `\n---\n_This PR was automatically approved because these versions were manually reviewed in another repository. See the [approval store](${approval_store_link}) for details._`
+        `\n---\n_This PR was automatically approved because these versions were manually reviewed in another repository. See the [approval store](${approval_store_link}) for details._`,
     )
 
     return lines.join("\n")
 }
 
-const approveAndMergePr = async (pr: PrPayload, octokit: ProbotOctokit, repository: Repository, dependencies: Dependency[], mergeStrategy: "squash" | "merge" | "rebase"): Promise<boolean> => {
+const approveAndMergePr = async (
+    pr: PrPayload,
+    octokit: ProbotOctokit,
+    repository: Repository,
+    dependencies: Dependency[],
+    mergeStrategy: "squash" | "merge" | "rebase",
+): Promise<boolean> => {
     const comment = buildApprovalComment(dependencies)
 
     try {
@@ -121,7 +171,7 @@ const approveAndMergePr = async (pr: PrPayload, octokit: ProbotOctokit, reposito
             repo: repository.name,
             pull_number: pr.number,
             event: "APPROVE",
-            body: comment
+            body: comment,
         })
 
         await octokit.rest.pulls.merge({
@@ -138,7 +188,12 @@ const approveAndMergePr = async (pr: PrPayload, octokit: ProbotOctokit, reposito
     }
 }
 
-export const checkPendingPrs = async (octokit: ProbotOctokit, owner: string, store: ApprovalStore, dryRun: boolean = false) => {
+export const checkPendingPrs = async (
+    octokit: ProbotOctokit,
+    owner: string,
+    store: ApprovalStore,
+    dryRun = false,
+): Promise<void> => {
     const config = await store.getConfig()
     const repos = config.enrolledRepos
     const mergeStrategy = config.mergeStrategy
@@ -147,28 +202,31 @@ export const checkPendingPrs = async (octokit: ProbotOctokit, owner: string, sto
     const approvedVersions = await store.getApprovedVersions()
 
     for (const repo of repos) {
-        const openPrs = await octokit.paginate(
-            octokit.rest.pulls.list,
-            {
-                owner,
-                repo,
-                state: "open",
-                per_page: 100,
-            }
-        )
+        const openPrs = await octokit.paginate(octokit.rest.pulls.list, {
+            owner,
+            repo,
+            state: "open",
+            per_page: 100,
+        })
 
         for (const pr of openPrs) {
             if (!isDepedabotPr(pr)) {
                 continue
             }
 
-            const prDependencies = await extractPrDependencies(pr, octokit, owner)
+            const prDependencies = await extractPrDependencies(
+                pr,
+                octokit,
+                owner,
+            )
 
             if (prDependencies.length === 0) {
                 continue
             }
 
-            let allApproved = prDependencies.every(dep => versionIsApproved(approvedVersions, dep))
+            const allApproved = prDependencies.every((dep) =>
+                versionIsApproved(approvedVersions, dep),
+            )
 
             if (allApproved) {
                 if (requireCi) {
@@ -178,9 +236,14 @@ export const checkPendingPrs = async (octokit: ProbotOctokit, owner: string, sto
                         ref: pr.head.sha,
                     })
 
-                    const ciChecks = checks.data.check_runs.filter(check => check.app?.slug === "github-actions")
+                    const ciChecks = checks.data.check_runs.filter(
+                        (check) => check.app?.slug === "github-actions",
+                    )
 
-                    if (ciChecks.length === 0 || ciChecks.some(check => check.conclusion !== "success")) {
+                    if (
+                        ciChecks.length === 0 ||
+                        ciChecks.some((check) => check.conclusion !== "success")
+                    ) {
                         continue
                     }
                 }
@@ -191,7 +254,9 @@ export const checkPendingPrs = async (octokit: ProbotOctokit, owner: string, sto
                 })
 
                 if (dryRun) {
-                    console.log(`Dry run: would approve and merge PR #${pr.number} in ${repo}`)
+                    console.log(
+                        `Dry run: would approve and merge PR #${pr.number} in ${repo}`,
+                    )
                     continue
                 }
 
@@ -202,15 +267,32 @@ export const checkPendingPrs = async (octokit: ProbotOctokit, owner: string, sto
                     pull_number: pr.number,
                 })
 
-                if (!["clean", "blocked"].includes(prData.data.mergeable_state) || !prData.data.mergeable) {
-                    console.log(`PR #${pr.number} in ${repo} cannot be merged, skipping`)
-                    console.log(`Mergeable state: ${prData.data.mergeable_state}, Mergeable: ${prData.data.mergeable}`)
+                if (
+                    !["clean", "blocked"].includes(
+                        prData.data.mergeable_state,
+                    ) ||
+                    !prData.data.mergeable
+                ) {
+                    console.log(
+                        `PR #${pr.number} in ${repo} cannot be merged, skipping`,
+                    )
+                    console.log(
+                        `Mergeable state: ${prData.data.mergeable_state}, Mergeable: ${prData.data.mergeable}`,
+                    )
                     continue
                 }
 
-                console.log(`Approving and merging PR #${pr.number} in ${repo}...`)
-                continue
-                const success = await approveAndMergePr(pr, octokit, repoData.data, prDependencies, mergeStrategy)
+                console.log(
+                    `Approving and merging PR #${pr.number} in ${repo}...`,
+                )
+
+                const success = await approveAndMergePr(
+                    pr,
+                    octokit,
+                    repoData.data,
+                    prDependencies,
+                    mergeStrategy,
+                )
 
                 if (success) {
                     // TODO: Log event
@@ -220,9 +302,17 @@ export const checkPendingPrs = async (octokit: ProbotOctokit, owner: string, sto
     }
 }
 
-// export const captureApproval = async (context: Context<"pull_request.closed" | "pull_request_review.submitted">) => {
-export const captureApproval = async (pr: PrPayload, octokit: ProbotOctokit, repository: Repository, user: string) => {
-    const dependencies = await extractPrDependencies(pr, octokit, repository.owner.login)
+export const captureApproval = async (
+    pr: PrPayload,
+    octokit: ProbotOctokit,
+    repository: Repository,
+    user: string,
+): Promise<void> => {
+    const dependencies = await extractPrDependencies(
+        pr,
+        octokit,
+        repository.owner.login,
+    )
 
     if (dependencies.length === 0) {
         return
@@ -234,24 +324,39 @@ export const captureApproval = async (pr: PrPayload, octokit: ProbotOctokit, rep
     const newlyApprovedDeps = []
 
     for (const dep of dependencies) {
-        const newApproval = await store.approveVersion(dep, user, repository.full_name, pr.number)
+        const newApproval = await store.approveVersion(
+            dep,
+            user,
+            repository.full_name,
+            pr.number,
+        )
         if (newApproval) {
             newlyApprovedDeps.push(dep)
         }
     }
 
     if (newlyApprovedDeps.length > 0) {
-        console.log(`Approved new versions: ${newlyApprovedDeps.map(d => `${d.name}==${d.version} (${d.ecosystem})`).join(", ")}`)
+        console.log(
+            `Approved new versions: ${newlyApprovedDeps.map((d) => `${d.name}==${d.version} (${d.ecosystem})`).join(", ")}`,
+        )
         await checkPendingPrs(octokit, repository.owner.login, store)
     }
 }
 
-export const checkPr = async (pr: PrPayload, octokit: ProbotOctokit, repository: Repository) => {
+export const checkPr = async (
+    pr: PrPayload,
+    octokit: ProbotOctokit,
+    repository: Repository,
+): Promise<void> => {
     if (!isDepedabotPr(pr)) {
         return
     }
 
-    const dependencies = await extractPrDependencies(pr, octokit, repository.owner.login)
+    const dependencies = await extractPrDependencies(
+        pr,
+        octokit,
+        repository.owner.login,
+    )
     if (dependencies.length === 0) {
         return
     }
@@ -278,7 +383,13 @@ export const checkPr = async (pr: PrPayload, octokit: ProbotOctokit, repository:
 
     const config = await store.getConfig()
 
-    const success = await approveAndMergePr(pr, octokit, repository, dependencies, config.mergeStrategy)
+    const success = await approveAndMergePr(
+        pr,
+        octokit,
+        repository,
+        dependencies,
+        config.mergeStrategy,
+    )
 
     if (!success) {
         // Handle failure (e.g. log, comment on PR, etc.)
