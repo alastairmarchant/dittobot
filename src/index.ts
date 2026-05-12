@@ -1,0 +1,61 @@
+import { Probot } from "probot"
+import { isDepedabotPr, checkPr, captureApproval } from "./dependencies.js"
+
+export default (app: Probot) => {
+  app.on(["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"], async (context) => {
+    if (!isDepedabotPr(context.payload.pull_request)) {
+      return
+    }
+
+    await checkPr(context.payload.pull_request, context.octokit, context.payload.repository)
+  })
+
+  app.on("pull_request.closed", async (context) => {
+    if (!isDepedabotPr(context.payload.pull_request)) {
+      return
+    }
+
+    if (context.isBot) {
+      return
+    }
+
+    const user = context.payload.sender.login
+    await captureApproval(context.payload.pull_request, context.octokit, context.payload.repository, user)
+  })
+
+  app.on("pull_request_review.submitted", async (context) => {
+    if (context.payload.review.state !== "approved") {
+      return
+    }
+
+    if (context.isBot) {
+      return
+    }
+
+    if (!isDepedabotPr(context.payload.pull_request)) {
+      return
+    }
+    const user = context.payload.review.user?.login || context.payload.sender.login
+    await captureApproval(context.payload.pull_request, context.octokit, context.payload.repository, user)
+  })
+
+  app.on("check_suite.completed", async (context) => {
+    const pr = context.payload.check_suite.pull_requests[0]
+    if (!pr) {
+        return
+    }
+
+    const prDetails = await context.octokit.rest.pulls.get({
+          owner: context.payload.repository.owner.login,
+          repo: context.payload.repository.name,
+          pull_number: pr.number
+      })
+      const prData = prDetails.data
+
+    if (!isDepedabotPr(prData)) {
+      return
+    }
+
+    await checkPr(prData, context.octokit, context.payload.repository)
+  })
+}
