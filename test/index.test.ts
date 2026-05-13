@@ -55,7 +55,7 @@ vi.mock("../src/store.js", async () => {
         )
     return {
         ...store,
-        getStoreProvider: vi.fn().mockImplementation(async () => {
+        getStoreProvider: vi.fn().mockImplementation(() => {
             const provider = new store.MemoryVersionStoreProvider({
                 TYPE: "memory",
                 ORG: "octocat",
@@ -64,7 +64,7 @@ vi.mock("../src/store.js", async () => {
                 REQUIRE_CI: true,
             })
 
-            await provider.addApprovedVersion(
+            provider.addApprovedVersion(
                 "ruff",
                 "0.15.11",
                 "uv",
