@@ -28,7 +28,7 @@ program
     .command("approve")
     .description("Approve a dependency version")
     .argument("<dependency>", "The dependency to approve")
-    .option("-v, --version <version>", "The version to approve")
+    .option("-v, --dep-version <version>", "The version to approve")
     .option(
         "-e, --ecosystem <ecosystem>",
         "The ecosystem to approve for (e.g. npm, pip, etc.)",
@@ -41,11 +41,15 @@ program
     .action(
         async (
             dependency: string,
-            options: { version?: string; ecosystem?: string; user: string },
+            options: {
+                depVersion?: string
+                ecosystem?: string
+                user: string
+            },
         ) => {
-            if (!options.version || !options.ecosystem) {
+            if (!options.depVersion || !options.ecosystem) {
                 throw new Error(
-                    "Error: --version and --ecosystem options are required",
+                    "Error: --dep-version and --ecosystem options are required",
                 )
             }
 
@@ -59,7 +63,7 @@ program
 
             const dep: Dependency = {
                 name: dependency,
-                version: options.version,
+                version: options.depVersion,
                 ecosystem: options.ecosystem,
                 type: "direct",
             }
