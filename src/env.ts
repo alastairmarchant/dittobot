@@ -38,7 +38,7 @@ const StoreConfigSchema = z.discriminatedUnion("TYPE", [
 export type StoreProviderConfig = z.infer<typeof StoreConfigSchema>
 
 const EnvSchema = z.object({
-    STRICT_VERSIONS: z.coerce.boolean().default(true),
+    STRICT_VERSIONS: z.stringbool().default(true),
     STORE: StoreConfigSchema,
 })
 
