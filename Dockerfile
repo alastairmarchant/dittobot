@@ -10,13 +10,13 @@ COPY src ./src
 RUN npm run build
 
 
-FROM node:24-bookworm-slim AS development
+FROM node:24-trixie-slim AS development
 
 ENV NODE_ENV=development
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends dumb-init \
+	&& apt-get install -y --no-install-recommends curl=8.14.1-2+deb13u2 dumb-init=1.2.5-3 \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
@@ -37,21 +37,23 @@ EXPOSE 3000
 VOLUME ["/data"]
 
 ENV DITTOBOT_STORE__TYPE=local
-ENV DITTOBOT_STORE__FILE_PATH=/data
+ENV DITTOBOT_STORE__PATH=/data
 
 RUN npm run build
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD curl --fail http://localhost:3000/ping || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "start"]
 
 
-FROM node:24-bookworm-slim AS production
+FROM node:24-trixie-slim AS production
 
 ENV NODE_ENV=production
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends dumb-init \
+	&& apt-get install -y --no-install-recommends curl=8.14.1-2+deb13u2 dumb-init=1.2.5-3 \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
@@ -70,7 +72,9 @@ EXPOSE 3000
 VOLUME ["/data"]
 
 ENV DITTOBOT_STORE__TYPE=local
-ENV DITTOBOT_STORE__FILE_PATH=/data
+ENV DITTOBOT_STORE__PATH=/data
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD curl --fail http://localhost:3000/ping || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "start"]
