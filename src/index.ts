@@ -1,5 +1,5 @@
 import { Probot } from "probot"
-import { isDepedabotPr, checkPr, captureApproval } from "./dependencies.js"
+import { isDependabotPr, checkPr, captureApproval } from "./dependencies.js"
 
 export default (app: Probot): void => {
     app.on(
@@ -9,7 +9,7 @@ export default (app: Probot): void => {
             "pull_request.synchronize",
         ],
         async (context) => {
-            if (!isDepedabotPr(context.payload.pull_request)) {
+            if (!isDependabotPr(context.payload.pull_request)) {
                 return
             }
 
@@ -22,7 +22,7 @@ export default (app: Probot): void => {
     )
 
     app.on("pull_request.closed", async (context) => {
-        if (!isDepedabotPr(context.payload.pull_request)) {
+        if (!isDependabotPr(context.payload.pull_request)) {
             return
         }
 
@@ -48,7 +48,7 @@ export default (app: Probot): void => {
             return
         }
 
-        if (!isDepedabotPr(context.payload.pull_request)) {
+        if (!isDependabotPr(context.payload.pull_request)) {
             return
         }
         const user =
@@ -76,7 +76,7 @@ export default (app: Probot): void => {
         })
         const prData = prDetails.data
 
-        if (!isDepedabotPr(prData)) {
+        if (!isDependabotPr(prData)) {
             return
         }
 

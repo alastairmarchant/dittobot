@@ -30,7 +30,7 @@ type Repository =
     | WebhookComponents["schemas"]["repository-webhooks"]
     | RestComponents["schemas"]["full-repository"]
 
-export const isDepedabotPr = (pr: PrPayload): boolean => {
+export const isDependabotPr = (pr: PrPayload): boolean => {
     return (
         pr.user?.login === "dependabot[bot]" || pr.user?.login === "dependabot"
     )
@@ -210,7 +210,7 @@ export const checkPendingPrs = async (
         })
 
         for (const pr of openPrs) {
-            if (!isDepedabotPr(pr)) {
+            if (!isDependabotPr(pr)) {
                 continue
             }
 
@@ -348,7 +348,7 @@ export const checkPr = async (
     octokit: ProbotOctokit,
     repository: Repository,
 ): Promise<void> => {
-    if (!isDepedabotPr(pr)) {
+    if (!isDependabotPr(pr)) {
         return
     }
 

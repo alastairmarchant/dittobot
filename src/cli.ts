@@ -4,7 +4,7 @@ import { Command } from "@commander-js/extra-typings"
 import ApprovalStore, { getStoreProvider } from "./store.js"
 import {
     extractPrDependencies,
-    isDepedabotPr,
+    isDependabotPr,
     versionIsApproved,
     checkPendingPrs,
 } from "./dependencies.js"
@@ -26,7 +26,7 @@ program
 
 program
     .command("approve")
-    .description("Approve a depenency version")
+    .description("Approve a dependency version")
     .argument("<dependency>", "The dependency to approve")
     .option("-v, --version <version>", "The version to approve")
     .option(
@@ -125,7 +125,7 @@ program
 
             console.log(`\n${repo}`)
             for (const pr of prs) {
-                if (!isDepedabotPr(pr)) {
+                if (!isDependabotPr(pr)) {
                     continue
                 }
 
