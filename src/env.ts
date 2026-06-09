@@ -46,7 +46,7 @@ export type DittoBotConfig = z.infer<typeof EnvSchema>
 
 type NestedObject = { [key: string]: string | NestedObject }
 
-const nestObject = (
+export const nestObject = (
     flatObj: Record<string, string>,
     separator = "__",
 ): NestedObject => {
@@ -74,7 +74,7 @@ const nestObject = (
     return nestedObj
 }
 
-const parseEnv = (): z.infer<typeof EnvSchema> => {
+export const parseEnv = (): z.infer<typeof EnvSchema> => {
     const envEntries = Object.entries(process.env)
         .filter(([key]) => key.startsWith("DITTOBOT_"))
         .map(

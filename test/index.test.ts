@@ -14,7 +14,7 @@ import prClosedPayload from "./fixtures/pull_request.closed.json" with { type: "
 import prReviewSubmittedPayload from "./fixtures/pull_request_review.submitted.json" with { type: "json" }
 import checkSuiteCompletedPayload from "./fixtures/check_suite.completed.json" with { type: "json" }
 import ApprovalStore from "../src/store.js"
-import type { MemoryVersionStoreProvider } from "../src/store.js"
+import { MemoryVersionStoreProvider, getStoreProvider } from "../src/store.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -42,7 +42,19 @@ updated-dependencies:
 
 Signed-off-by: dependabot[bot] <support@github.com>`
 
-let mockStoreProvider: MemoryVersionStoreProvider
+const twoDepCommitMessage = `build(deps-dev): bump the dev group across 1 directory with 2 updates
+
+---
+updated-dependencies:
+- dependency-name: ruff
+  dependency-version: 0.15.11
+  dependency-type: direct:production
+- dependency-name: black
+  dependency-version: 23.1.0
+  dependency-type: direct:production
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>`
 
 const deepClone = <T>(obj: T): T => {
     return JSON.parse(JSON.stringify(obj)) as T
@@ -55,33 +67,13 @@ vi.mock("../src/store.js", async () => {
         )
     return {
         ...store,
-        getStoreProvider: vi.fn().mockImplementation(() => {
-            const provider = new store.MemoryVersionStoreProvider({
-                TYPE: "memory",
-                ORG: "octocat",
-                ENROLLED_REPOS: ["octocat/Hello-World", "octocat/Another-Repo"],
-                MERGE_STRATEGY: "squash",
-                REQUIRE_CI: true,
-            })
-
-            provider.addApprovedVersion(
-                "ruff",
-                "0.15.11",
-                "uv",
-                "octocat",
-                "octocat/Hello-World",
-                28,
-            )
-
-            mockStoreProvider = provider
-
-            return provider
-        }),
+        getStoreProvider: vi.fn(),
     }
 })
 
 describe("DittoBot app", () => {
     let probot: Probot
+    let mockStoreProvider: MemoryVersionStoreProvider
 
     beforeEach(async () => {
         nock.disableNetConnect()
@@ -97,6 +89,25 @@ describe("DittoBot app", () => {
         })
         // Load our app into probot
         await probot.load(dittobotApp)
+
+        // Create a fresh store for each test
+        mockStoreProvider = new MemoryVersionStoreProvider({
+            TYPE: "memory",
+            ORG: "octocat",
+            ENROLLED_REPOS: ["Team Environment", "Another-Repo"],
+            MERGE_STRATEGY: "squash",
+            REQUIRE_CI: false,
+        })
+        // Pre-load ruff 0.15.11 for tests that need it
+        await mockStoreProvider.addApprovedVersion(
+            "ruff",
+            "0.15.11",
+            "uv",
+            "octocat",
+            "octocat/Hello-World",
+            28,
+        )
+        vi.mocked(getStoreProvider).mockReturnValue(mockStoreProvider)
     })
 
     test.each([
@@ -129,6 +140,18 @@ describe("DittoBot app", () => {
         expect(mock.pendingMocks()).toStrictEqual([])
     })
 
+    test("Skips dependabot pull requests closed without merging", async () => {
+        const mock = nock("https://api.github.com")
+
+        const payload = deepClone(prClosedPayload)
+        payload.pull_request.user.login = "dependabot[bot]"
+        payload.pull_request.merged = false
+
+        await probot.receive({ name: "pull_request.closed", payload })
+
+        expect(mock.pendingMocks()).toStrictEqual([])
+    })
+
     test("Skips dependabot pull requests approved by bots", async () => {
         const mock = nock("https://api.github.com")
 
@@ -146,7 +169,7 @@ describe("DittoBot app", () => {
         ["pull_request.reopened", prReopenedPayload],
         ["pull_request.synchronize", prSynchronizePayload],
     ])(
-        "Merges and creates a comment on %s with approved dependencies",
+        "auto-merges and posts approval comment on %s when all versions are pre-approved",
         async (event, payload) => {
             const mock = nock("https://api.github.com")
                 .post("/app/installations/1/access_tokens")
@@ -165,6 +188,12 @@ describe("DittoBot app", () => {
                         },
                     },
                 ])
+                .get("/repos/octocat/Team%20Environment/pulls/42")
+                .reply(200, {
+                    state: "open",
+                    mergeable_state: "clean",
+                    mergeable: true,
+                })
 
                 // Test that a comment is posted
                 .post(
@@ -194,7 +223,7 @@ _This PR was automatically approved because these versions were manually reviewe
         },
     )
 
-    test("Ignores merged PR when version is already approved", async () => {
+    test("does not re-approve ruff when version 0.15.11 is already in the store", async () => {
         const mock = nock("https://api.github.com")
             .post("/app/installations/1/access_tokens")
             .reply(200, {
@@ -235,7 +264,7 @@ _This PR was automatically approved because these versions were manually reviewe
         })
     })
 
-    test("Approves dependency version when PR is merged", async () => {
+    test("stores new approved version when merged PR contains unapproved version", async () => {
         const mock = nock("https://api.github.com")
             .post("/app/installations/1/access_tokens")
             .reply(200, {
@@ -256,19 +285,21 @@ _This PR was automatically approved because these versions were manually reviewe
                 },
             ])
             .get(
-                "/repos/octocat/octocat%2FHello-World/pulls?state=open&per_page=100",
+                "/repos/octocat/Team%20Environment/pulls?state=open&per_page=100",
             )
             .reply(200, [])
-            .get(
-                "/repos/octocat/octocat%2FAnother-Repo/pulls?state=open&per_page=100",
-            )
+            .get("/repos/octocat/Another-Repo/pulls?state=open&per_page=100")
             .reply(200, [])
 
         await probot.receive({ name: "pull_request", payload: prClosedPayload })
 
         expect(mock.pendingMocks()).toStrictEqual([])
 
-        expect(await mockStoreProvider.getApprovedVersions()).toMatchObject({
+        const versions = await mockStoreProvider.getApprovedVersions()
+        expect(versions.uv?.ruff?.["0.15.12"]).toBeDefined()
+        expect(versions.uv?.ruff?.["0.15.12"]?.approvedBy).toBe("octocat")
+
+        expect(versions).toMatchObject({
             uv: {
                 ruff: {
                     "0.15.11": {
@@ -313,12 +344,10 @@ _This PR was automatically approved because these versions were manually reviewe
                 },
             ])
             .get(
-                "/repos/octocat/octocat%2FHello-World/pulls?state=open&per_page=100",
+                "/repos/octocat/Team%20Environment/pulls?state=open&per_page=100",
             )
             .reply(200, [])
-            .get(
-                "/repos/octocat/octocat%2FAnother-Repo/pulls?state=open&per_page=100",
-            )
+            .get("/repos/octocat/Another-Repo/pulls?state=open&per_page=100")
             .reply(200, [])
 
         await probot.receive({
@@ -350,12 +379,10 @@ _This PR was automatically approved because these versions were manually reviewe
                 },
             ])
             .get(
-                "/repos/octocat/octocat%2FHello-World/pulls?state=open&per_page=100",
+                "/repos/octocat/Team%20Environment/pulls?state=open&per_page=100",
             )
             .reply(200, [])
-            .get(
-                "/repos/octocat/octocat%2FAnother-Repo/pulls?state=open&per_page=100",
-            )
+            .get("/repos/octocat/Another-Repo/pulls?state=open&per_page=100")
             .reply(200, [])
 
         const payload = deepClone(prReviewSubmittedPayload)
@@ -395,7 +422,7 @@ _This PR was automatically approved because these versions were manually reviewe
         expect(mock.pendingMocks()).toStrictEqual([])
     })
 
-    test("Merges and creates a comment on check_suite.completed with approved dependencies", async () => {
+    test("auto-merges on check_suite.completed when all versions are approved", async () => {
         const mock = nock("https://api.github.com")
             .post("/app/installations/1/access_tokens")
             .reply(200, {
@@ -407,6 +434,7 @@ _This PR was automatically approved because these versions were manually reviewe
             .get("/repos/octocat/Team%20Environment/pulls/42")
             .reply(200, {
                 number: 42,
+                state: "open",
                 user: {
                     login: "dependabot[bot]",
                 },
@@ -434,6 +462,12 @@ _This PR was automatically approved because these versions were manually reviewe
                     },
                 },
             ])
+            .get("/repos/octocat/Team%20Environment/pulls/42")
+            .reply(200, {
+                state: "open",
+                mergeable_state: "clean",
+                mergeable: true,
+            })
 
             // Test that a comment is posted
             .post(
@@ -514,17 +548,77 @@ _This PR was automatically approved because these versions were manually reviewe
         expect(mock.pendingMocks()).toStrictEqual([])
     })
 
+    test("does not auto-merge when only some dependencies are approved", async () => {
+        const mock = nock("https://api.github.com")
+            .post("/app/installations/1/access_tokens")
+            .reply(200, {
+                token: "test",
+                permissions: {
+                    pull_requests: "write",
+                },
+            })
+            .get("/repos/octocat/Team%20Environment/pulls/42/commits")
+            .reply(200, [
+                {
+                    sha: "abc123",
+                    commit: {
+                        message: twoDepCommitMessage,
+                    },
+                },
+            ])
+
+        await probot.receive({ name: "pull_request", payload: prOpenedPayload })
+
+        // No review or merge should be called
+        expect(mock.pendingMocks()).toStrictEqual([])
+    })
+
+    test("does not throw when GitHub API returns 500 on merge", async () => {
+        nock("https://api.github.com")
+            .post("/app/installations/1/access_tokens")
+            .reply(200, {
+                token: "test",
+                permissions: {
+                    pull_requests: "write",
+                },
+            })
+            .get("/repos/octocat/Team%20Environment/pulls/42/commits")
+            .reply(200, [
+                {
+                    sha: "abc123",
+                    commit: {
+                        message: dependabotCommitMessage,
+                    },
+                },
+            ])
+            .get("/repos/octocat/Team%20Environment/pulls/42")
+            .reply(200, {
+                state: "open",
+                mergeable_state: "clean",
+                mergeable: true,
+            })
+            .post("/repos/octocat/Team%20Environment/pulls/42/reviews")
+            .reply(500, { message: "Internal Server Error" })
+
+        await expect(
+            probot.receive({ name: "pull_request", payload: prOpenedPayload }),
+        ).resolves.not.toThrow()
+    })
+
+    test("skips check_suite.completed when conclusion is not success", async () => {
+        const payload = deepClone(checkSuiteCompletedPayload)
+        payload.check_suite.conclusion = "failure"
+
+        const mock = nock("https://api.github.com")
+
+        await probot.receive({ name: "check_suite", payload })
+
+        expect(mock.pendingMocks()).toStrictEqual([])
+    })
+
     afterEach(() => {
         nock.cleanAll()
         nock.enableNetConnect()
+        vi.resetAllMocks()
     })
 })
-
-// For more information about testing with Jest see:
-// https://facebook.github.io/jest/
-
-// For more information about using TypeScript in your tests, Jest recommends:
-// https://github.com/kulshekhar/ts-jest
-
-// For more information about testing with Nock see:
-// https://github.com/nock/nock

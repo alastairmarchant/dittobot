@@ -36,6 +36,11 @@ type ApprovalFileData = {
     approved: ApprovedVersions
 }
 
+const APPROVAL_FILE_METADATA = {
+    description: "Approved dependency versions for Dependabot auto-merge",
+    schema_version: "1.0",
+}
+
 export type AuditEvent = {
     action: string
     timestamp: string
@@ -142,10 +147,8 @@ export class LocalFileStoreProvider implements VersionStoreProvider {
             this._approvalFile,
             {
                 metadata: {
-                    description:
-                        "Approved dependency versions for Dependabot auto-merge",
+                    ...APPROVAL_FILE_METADATA,
                     last_updated: new Date().toISOString(),
-                    schema_version: "1.0",
                 },
                 approved: {},
             },
@@ -181,10 +184,8 @@ export class LocalFileStoreProvider implements VersionStoreProvider {
 
         const fullData: ApprovalFileData = {
             metadata: {
-                description:
-                    "Approved dependency versions for Dependabot auto-merge",
+                ...APPROVAL_FILE_METADATA,
                 last_updated: new Date().toISOString(),
-                schema_version: "1.0",
             },
             approved: versions,
         }
@@ -219,8 +220,14 @@ export class LocalFileStoreProvider implements VersionStoreProvider {
 }
 
 export class GithubVersionStoreProvider implements VersionStoreProvider {
-    configSha: string | undefined = undefined
-    private readonly _repoName: string
+    private _configSha: string | undefined = undefined
+
+    get configSha(): string | undefined {
+        return this._configSha
+    }
+
+    private readonly _owner: string
+    private readonly _repo: string
     private readonly _configFile = "config.json"
     private readonly _approvalFile = "approved-versions.json"
     private readonly _auditLogFile = "audit-log.json"
@@ -230,11 +237,13 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
         private readonly _octokit: ProbotOctokit,
         config: GithubStoreConfig,
     ) {
-        this._repoName = config.REPO
+        const [owner, repo] = config.REPO.split("/")
+        this._owner = owner!
+        this._repo = repo!
     }
 
     get approvalStoreLink(): string {
-        return `https://github.com/${this._repoName}`
+        return `https://github.com/${this._owner}/${this._repo}`
     }
 
     async getConfig(): Promise<StoreConfig> {
@@ -255,12 +264,12 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
 
         const { data } =
             await this._octokit.rest.repos.createOrUpdateFileContents({
-                owner: this._repoName.split("/")[0]!,
-                repo: this._repoName.split("/")[1]!,
+                owner: this._owner,
+                repo: this._repo,
                 path: this._configFile,
                 message: `Update ${field} in config`,
                 content,
-                sha: this.configSha,
+                sha: this._configSha,
             })
 
         const newSha = data.content?.sha
@@ -269,7 +278,7 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
             throw new Error("Failed to update config")
         }
 
-        this.configSha = newSha
+        this._configSha = newSha
         return config
     }
 
@@ -307,10 +316,8 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
 
         const fullData = {
             metadata: {
-                description:
-                    "Approved dependency versions for Dependabot auto-merge",
+                ...APPROVAL_FILE_METADATA,
                 last_updated: new Date().toISOString(),
-                schema_version: "1.0",
             },
             approved: versions,
         }
@@ -321,8 +328,8 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
 
         const { data } =
             await this._octokit.rest.repos.createOrUpdateFileContents({
-                owner: this._repoName.split("/")[0]!,
-                repo: this._repoName.split("/")[1]!,
+                owner: this._owner,
+                repo: this._repo,
                 path: this._approvalFile,
                 message: `Add approved version ${version} for ${packageName}`,
                 content,
@@ -341,10 +348,11 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
 
     async logEvent(event: AuditEvent): Promise<void> {
         let auditData: AuditFileData
+        let auditSha: string | undefined = undefined
         try {
             const { data, sha } = await this._fetchJsonFile(this._auditLogFile)
             auditData = data as unknown as AuditFileData
-            this.configSha = sha
+            auditSha = sha
         } catch {
             auditData = { events: [] }
         }
@@ -356,12 +364,12 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
         ).toString("base64")
 
         await this._octokit.rest.repos.createOrUpdateFileContents({
-            owner: this._repoName.split("/")[0]!,
-            repo: this._repoName.split("/")[1]!,
+            owner: this._owner,
+            repo: this._repo,
             path: this._auditLogFile,
             message: `Log event ${event.action}`,
             content,
-            sha: this.configSha,
+            sha: auditSha,
         })
     }
 
@@ -369,8 +377,8 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
         filePath: string,
     ): Promise<{ data: JsonObject; sha: string }> {
         const fileInfo = await this._octokit.rest.repos.getContent({
-            owner: this._repoName.split("/")[0]!,
-            repo: this._repoName.split("/")[1]!,
+            owner: this._owner,
+            repo: this._repo,
             path: filePath,
         })
         if ("content" in fileInfo.data) {
@@ -502,22 +510,18 @@ class ApprovalStore {
             sourcePr,
         )
 
-        if (result) {
-            if (this._versionsCache) {
-                const packageMap = ensurePackageInVersions(
-                    this._versionsCache,
-                    dep.ecosystem,
-                    dep.name,
-                )
-                packageMap[dep.version] = {
-                    approvedAt: new Date().toISOString(),
-                    approvedBy,
-                    sourceRepo,
-                    sourcePr,
-                }
+        if (result && this._versionsCache) {
+            const packageMap = ensurePackageInVersions(
+                this._versionsCache,
+                dep.ecosystem,
+                dep.name,
+            )
+            packageMap[dep.version] = {
+                approvedAt: new Date().toISOString(),
+                approvedBy,
+                sourceRepo,
+                sourcePr,
             }
-        } else {
-            this.invalidateCache()
         }
 
         return result

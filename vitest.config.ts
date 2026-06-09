@@ -10,6 +10,13 @@ export default defineConfig(({ mode }) => {
             coverage: {
                 provider: "v8",
                 enabled: true,
+                include: ["src/**/*.ts"],
+                thresholds: {
+                    statements: 100,
+                    lines: 100,
+                    functions: 100,
+                    branches: 100,
+                },
             },
             env: {
                 ...env,

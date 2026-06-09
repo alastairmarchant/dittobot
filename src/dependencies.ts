@@ -14,7 +14,7 @@ export type Dependency = {
     name: string
     version: string
     ecosystem: string
-    type: "direct" | "indirect"
+    type: string
 }
 
 type WebhookPrPayload = WebhookComponents["schemas"][
@@ -40,7 +40,7 @@ type DependabotYamlData = {
     "updated-dependencies"?: {
         "dependency-name": string
         "dependency-version": string
-        "dependency-type": "direct" | "indirect"
+        "dependency-type": string
     }[]
 }
 
@@ -131,11 +131,7 @@ export const versionIsApproved = (
         return false
     }
 
-    if (compare(maxApprovedVersion, dep.version, ">=")) {
-        return true
-    }
-
-    return false
+    return compare(maxApprovedVersion, dep.version, ">=")
 }
 
 const buildApprovalComment = (approvedDeps: Dependency[]): string => {
@@ -188,6 +184,86 @@ const approveAndMergePr = async (
     }
 }
 
+export const prReadyToMerge = async (
+    pr: PrPayload,
+    octokit: ProbotOctokit,
+    repo: string,
+    owner: string,
+    approvedVersions: ApprovedVersions,
+    prDependencies: Dependency[],
+    requireCi: boolean,
+): Promise<boolean> => {
+    if (pr.state !== "open") {
+        console.log(`PR #${pr.number} in ${repo} is not open, skipping`)
+        return false
+    }
+
+    if (prDependencies.length === 0) {
+        console.log(`PR #${pr.number} in ${repo} has no dependencies, skipping`)
+        return false
+    }
+
+    const allApproved = prDependencies.every((dep) =>
+        versionIsApproved(approvedVersions, dep),
+    )
+
+    if (!allApproved) {
+        console.log(
+            `PR #${pr.number} in ${repo} has unapproved dependency versions, skipping`,
+        )
+        return false
+    }
+
+    if (requireCi) {
+        const checks = await octokit.rest.checks.listForRef({
+            owner,
+            repo,
+            ref: pr.head.sha,
+        })
+
+        const ciChecks = checks.data.check_runs.filter(
+            (check) => check.app?.slug === "github-actions",
+        )
+
+        if (
+            ciChecks.length === 0 ||
+            ciChecks.some(
+                (check) =>
+                    check.conclusion !== "success" &&
+                    check.conclusion !== "skipped",
+            )
+        ) {
+            console.log(
+                `PR #${pr.number} in ${repo} does not have all CI checks passing, skipping`,
+            )
+            return false
+        }
+    }
+
+    const prData = await octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: pr.number,
+    })
+
+    if (
+        !["clean", "blocked"].includes(prData.data.mergeable_state) ||
+        !prData.data.mergeable
+    ) {
+        console.log(`PR #${pr.number} in ${repo} cannot be merged, skipping`)
+        console.log(
+            `Mergeable state: ${prData.data.mergeable_state}, Mergeable: ${prData.data.mergeable}`,
+        )
+        return false
+    } else if (prData.data.state !== "open") {
+        // Check if PR is still open before attempting to merge
+        console.log(`PR #${pr.number} in ${repo} is no longer open, skipping`)
+        return false
+    }
+
+    return true
+}
+
 export const checkPendingPrs = async (
     octokit: ProbotOctokit,
     owner: string,
@@ -220,83 +296,44 @@ export const checkPendingPrs = async (
                 owner,
             )
 
-            if (prDependencies.length === 0) {
+            const ready = await prReadyToMerge(
+                pr,
+                octokit,
+                repo,
+                owner,
+                approvedVersions,
+                prDependencies,
+                requireCi,
+            )
+
+            if (!ready) {
                 continue
             }
 
-            const allApproved = prDependencies.every((dep) =>
-                versionIsApproved(approvedVersions, dep),
+            if (dryRun) {
+                console.log(
+                    `Dry run: would approve and merge PR #${pr.number} in ${repo}`,
+                )
+                continue
+            }
+
+            console.log(`Approving and merging PR #${pr.number} in ${repo}...`)
+
+            const repoData = await octokit.rest.repos.get({
+                owner,
+                repo,
+            })
+
+            const success = await approveAndMergePr(
+                pr,
+                octokit,
+                repoData.data,
+                prDependencies,
+                mergeStrategy,
             )
 
-            if (allApproved) {
-                if (requireCi) {
-                    const checks = await octokit.rest.checks.listForRef({
-                        owner,
-                        repo,
-                        ref: pr.head.sha,
-                    })
-
-                    const ciChecks = checks.data.check_runs.filter(
-                        (check) => check.app?.slug === "github-actions",
-                    )
-
-                    if (
-                        ciChecks.length === 0 ||
-                        ciChecks.some((check) => check.conclusion !== "success")
-                    ) {
-                        continue
-                    }
-                }
-
-                const repoData = await octokit.rest.repos.get({
-                    owner,
-                    repo,
-                })
-
-                if (dryRun) {
-                    console.log(
-                        `Dry run: would approve and merge PR #${pr.number} in ${repo}`,
-                    )
-                    continue
-                }
-
-                //check merge state
-                const prData = await octokit.rest.pulls.get({
-                    owner,
-                    repo,
-                    pull_number: pr.number,
-                })
-
-                if (
-                    !["clean", "blocked"].includes(
-                        prData.data.mergeable_state,
-                    ) ||
-                    !prData.data.mergeable
-                ) {
-                    console.log(
-                        `PR #${pr.number} in ${repo} cannot be merged, skipping`,
-                    )
-                    console.log(
-                        `Mergeable state: ${prData.data.mergeable_state}, Mergeable: ${prData.data.mergeable}`,
-                    )
-                    continue
-                }
-
-                console.log(
-                    `Approving and merging PR #${pr.number} in ${repo}...`,
-                )
-
-                const success = await approveAndMergePr(
-                    pr,
-                    octokit,
-                    repoData.data,
-                    prDependencies,
-                    mergeStrategy,
-                )
-
-                if (success) {
-                    // TODO: Log event
-                }
+            if (success) {
+                // TODO: Log event
             }
         }
     }
@@ -308,6 +345,15 @@ export const captureApproval = async (
     repository: Repository,
     user: string,
 ): Promise<void> => {
+    const storeProvider = getStoreProvider(octokit)
+    const store = new ApprovalStore(storeProvider)
+
+    const config = await store.getConfig()
+
+    if (!config.enrolledRepos.includes(repository.name)) {
+        return
+    }
+
     const dependencies = await extractPrDependencies(
         pr,
         octokit,
@@ -317,9 +363,6 @@ export const captureApproval = async (
     if (dependencies.length === 0) {
         return
     }
-
-    const storeProvider = getStoreProvider(octokit)
-    const store = new ApprovalStore(storeProvider)
 
     const newlyApprovedDeps = []
 
@@ -352,36 +395,40 @@ export const checkPr = async (
         return
     }
 
+    if (pr.state !== "open") {
+        return
+    }
+
+    const storeProvider = getStoreProvider(octokit)
+    const store = new ApprovalStore(storeProvider)
+
+    const config = await store.getConfig()
+
+    if (!config.enrolledRepos.includes(repository.name)) {
+        return
+    }
+
     const dependencies = await extractPrDependencies(
         pr,
         octokit,
         repository.owner.login,
     )
-    if (dependencies.length === 0) {
-        return
-    }
 
-    const approvedDependencies = []
-    const pendingDependencies = []
-
-    const storeProvider = getStoreProvider(octokit)
-
-    const store = new ApprovalStore(storeProvider)
     const approvedVersions = await store.getApprovedVersions()
 
-    for (const dep of dependencies) {
-        if (versionIsApproved(approvedVersions, dep)) {
-            approvedDependencies.push(dep)
-        } else {
-            pendingDependencies.push(dep)
-        }
-    }
+    const ready = await prReadyToMerge(
+        pr,
+        octokit,
+        repository.name,
+        repository.owner.login,
+        approvedVersions,
+        dependencies,
+        config.requireCi,
+    )
 
-    if (pendingDependencies.length > 0) {
+    if (!ready) {
         return
     }
-
-    const config = await store.getConfig()
 
     const success = await approveAndMergePr(
         pr,

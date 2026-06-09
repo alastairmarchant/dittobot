@@ -24,6 +24,130 @@ program
     )
     .version("1.0.0")
 
+export async function approveAction(
+    store: ApprovalStore,
+    dep: Dependency,
+    user: string,
+): Promise<void> {
+    await store.approveVersion(dep, user, "dittobot-cli", -1)
+}
+
+export async function listAction(store: ApprovalStore): Promise<void> {
+    const approvedVersions = await store.getApprovedVersions()
+
+    for (const [ecosystem, packages] of Object.entries(approvedVersions)) {
+        for (const [packageName, versions] of Object.entries(packages)) {
+            for (const [version, meta] of Object.entries(versions)) {
+                console.log(
+                    `${packageName}==${version} (${ecosystem}) approved by ${meta.approvedBy} on ${meta.approvedAt} in ${meta.sourceRepo}#${meta.sourcePr}`,
+                )
+            }
+        }
+    }
+}
+
+export async function pendingAction(
+    store: ApprovalStore,
+    octokit: ProbotOctokit,
+): Promise<void> {
+    const approvedVersions = await store.getApprovedVersions()
+
+    let totalPending = 0
+    let totalApproved = 0
+
+    const config = await store.getConfig()
+    const owner = config.org
+    for (const repo of config.enrolledRepos) {
+        const prs = await octokit.paginate(octokit.rest.pulls.list, {
+            owner: owner,
+            repo: repo,
+            state: "open",
+            per_page: 100,
+        })
+
+        if (prs.length === 0) {
+            continue
+        }
+
+        console.log(`\n${repo}`)
+        for (const pr of prs) {
+            if (!isDependabotPr(pr)) {
+                continue
+            }
+
+            const prDeps = await extractPrDependencies(pr, octokit, owner)
+            if (prDeps.length === 0) {
+                continue
+            }
+
+            const statuses = prDeps.map((dep) => ({
+                dep,
+                approved: versionIsApproved(approvedVersions, dep),
+            }))
+            const allApproved = statuses.every((s) => s.approved)
+
+            if (allApproved) {
+                totalApproved++
+            } else {
+                totalPending++
+            }
+
+            console.log(
+                `  [${allApproved ? "READY" : "PENDING"}] PR #${pr.number}: ${pr.title}`,
+            )
+            for (const { dep, approved } of statuses) {
+                console.log(
+                    `      ${dep.name}==${dep.version} (${dep.ecosystem}) ${approved ? "APPROVED" : "PENDING"}`,
+                )
+            }
+        }
+    }
+
+    console.log(`\nTotal pending PRs: ${totalPending}`)
+    console.log(`Total ready PRs: ${totalApproved}`)
+}
+
+export async function scanAction(
+    store: ApprovalStore,
+    octokit: ProbotOctokit,
+    dryRun: boolean,
+): Promise<void> {
+    const config = await store.getConfig()
+    await checkPendingPrs(octokit, config.org, store, dryRun)
+}
+
+export async function enrollAction(
+    store: ApprovalStore,
+    repo: string,
+): Promise<void> {
+    const config = await store.getConfig()
+
+    if (config.enrolledRepos.includes(repo)) {
+        console.log(`${repo} is already enrolled.`)
+        return
+    }
+
+    config.enrolledRepos.push(repo)
+    await store.updateConfig("enrolledRepos", config.enrolledRepos)
+    console.log(`Enrolled ${repo}.`)
+}
+
+export async function unenrollAction(
+    store: ApprovalStore,
+    repo: string,
+): Promise<void> {
+    const config = await store.getConfig()
+
+    if (!config.enrolledRepos.includes(repo)) {
+        console.log(`${repo} is not enrolled.`)
+        return
+    }
+
+    config.enrolledRepos = config.enrolledRepos.filter((r) => r !== repo)
+    await store.updateConfig("enrolledRepos", config.enrolledRepos)
+    console.log(`Unenrolled ${repo}.`)
+}
+
 program
     .command("approve")
     .description("Approve a dependency version")
@@ -68,7 +192,7 @@ program
                 type: "direct",
             }
 
-            await store.approveVersion(dep, options.user, "dittobot-cli", -1)
+            await approveAction(store, dep, options.user)
         },
     )
 
@@ -84,17 +208,7 @@ program
         const storeProvider = getStoreProvider(octokit)
         const store = new ApprovalStore(storeProvider)
 
-        const approvedVersions = await store.getApprovedVersions()
-
-        for (const [ecosystem, packages] of Object.entries(approvedVersions)) {
-            for (const [packageName, versions] of Object.entries(packages)) {
-                for (const [version, meta] of Object.entries(versions)) {
-                    console.log(
-                        `${packageName}==${version} (${ecosystem}) approved by ${meta.approvedBy} on ${meta.approvedAt} in ${meta.sourceRepo}#${meta.sourcePr}`,
-                    )
-                }
-            }
-        }
+        await listAction(store)
     })
 
 program
@@ -109,64 +223,8 @@ program
 
         const storeProvider = getStoreProvider(octokit)
         const store = new ApprovalStore(storeProvider)
-        const approvedVersions = await store.getApprovedVersions()
 
-        let totalPending = 0
-        let totalApproved = 0
-
-        const config = await store.getConfig()
-        for (const repo of config.enrolledRepos) {
-            const prs = await octokit.paginate(octokit.rest.pulls.list, {
-                owner: config.org,
-                repo: repo,
-                state: "open",
-                per_page: 100,
-            })
-
-            if (prs.length === 0) {
-                continue
-            }
-
-            console.log(`\n${repo}`)
-            for (const pr of prs) {
-                if (!isDependabotPr(pr)) {
-                    continue
-                }
-
-                const prDeps = await extractPrDependencies(
-                    pr,
-                    octokit,
-                    config.org,
-                )
-                if (prDeps.length === 0) {
-                    continue
-                }
-
-                const statuses = prDeps.map((dep) => ({
-                    dep,
-                    approved: versionIsApproved(approvedVersions, dep),
-                }))
-                const allApproved = statuses.every((s) => s.approved)
-
-                if (allApproved) {
-                    totalApproved++
-                } else {
-                    totalPending++
-                }
-
-                console.log(
-                    `  [${allApproved ? "READY" : "PENDING"}] PR #${pr.number}: ${pr.title}`,
-                )
-                for (const { dep, approved } of statuses) {
-                    console.log(
-                        `      ${dep.name}==${dep.version} (${dep.ecosystem}) ${approved ? "APPROVED" : "PENDING"}`,
-                    )
-                }
-            }
-        }
-
-        console.log(`\nTotal pending PRs: ${totalPending}`)
-        console.log(`Total ready PRs: ${totalApproved}`)
+        await pendingAction(store, octokit)
     })
 
 program
@@ -181,8 +239,7 @@ program
         })
         const storeProvider = getStoreProvider(octokit)
         const store = new ApprovalStore(storeProvider)
-        const config = await store.getConfig()
-        await checkPendingPrs(octokit, config.org, store, options.dryRun)
+        await scanAction(store, octokit, options.dryRun ?? false)
     })
 
 program
@@ -197,16 +254,8 @@ program
         })
         const storeProvider = getStoreProvider(octokit)
         const store = new ApprovalStore(storeProvider)
-        const config = await store.getConfig()
 
-        if (config.enrolledRepos.includes(repository)) {
-            console.log(`${repository} is already enrolled.`)
-            return
-        }
-
-        config.enrolledRepos.push(repository)
-        await store.updateConfig("enrolledRepos", config.enrolledRepos)
-        console.log(`Enrolled ${repository}.`)
+        await enrollAction(store, repository)
     })
 
 program
@@ -221,21 +270,12 @@ program
         })
         const storeProvider = getStoreProvider(octokit)
         const store = new ApprovalStore(storeProvider)
-        const config = await store.getConfig()
 
-        if (!config.enrolledRepos.includes(repository)) {
-            console.log(`${repository} is not enrolled.`)
-            return
-        }
-
-        config.enrolledRepos = config.enrolledRepos.filter(
-            (repo) => repo !== repository,
-        )
-        await store.updateConfig("enrolledRepos", config.enrolledRepos)
-        console.log(`Unenrolled ${repository}.`)
+        await unenrollAction(store, repository)
     })
 
 // Only parse if this file is run directly (not imported for tests)
+/* v8 ignore start */
 if (
     fileURLToPath(import.meta.url) ===
     realpathSync(process.argv[1] ?? "no_argv")
@@ -249,3 +289,4 @@ if (
 
     program.parse()
 }
+/* v8 ignore stop */

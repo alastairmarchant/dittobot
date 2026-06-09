@@ -25,7 +25,7 @@
         "format:check": "npx prettier --check .",
         "validate": "npm run typecheck && npm run lint && npm run format:check",
         "prepublishOnly": "npm run build",
-        "prepare": "husky"
+        "prepare": "husky || true"
     },
     "bin": {
         "dittobot": "./dist/cli.js"

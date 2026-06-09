@@ -30,6 +30,10 @@ export default (app: Probot): void => {
             return
         }
 
+        if (!context.payload.pull_request.merged) {
+            return
+        }
+
         const user = context.payload.sender.login
         await captureApproval(
             context.payload.pull_request,
@@ -62,6 +66,10 @@ export default (app: Probot): void => {
     })
 
     app.on("check_suite.completed", async (context) => {
+        if (context.payload.check_suite.conclusion !== "success") {
+            return
+        }
+
         const pr = context.payload.check_suite.pull_requests[0] as
             | { number: number }
             | undefined
