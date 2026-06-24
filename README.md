@@ -10,8 +10,11 @@
 # Install dependencies
 npm install
 
+# Copy environment config and fill in your values
+cp .env.example .env
+
 # Compile
-npm build
+npm run build
 
 # Run the bot
 npm start
@@ -23,9 +26,37 @@ npm start
 # 1. Build container
 docker build -t dittobot .
 
-# 2. Start container
-docker run -e APP_ID=<app-id> -e PRIVATE_KEY=<pem-value> dittobot
+# 2. Start container (pass required Probot vars and your store config)
+docker run \
+  -e APP_ID=<app-id> \
+  -e PRIVATE_KEY=<pem-value> \
+  -e WEBHOOK_SECRET=<secret> \
+  -e DITTOBOT_STORE__TYPE=github \
+  -e DITTOBOT_STORE__DEFAULT_REPO=<owner/repo> \
+  dittobot
 ```
+
+## CLI
+
+DittoBot includes a CLI for managing approved dependency versions. All CLI commands require a GitHub PAT token:
+
+```sh
+export GITHUB_PAT_TOKEN=<your-github-pat>
+
+# Approve a dependency version
+npx dittobot approve <dependency> --dep-version <version> --ecosystem <npm|pip|...> --user <github-username>
+
+# List approved versions
+npx dittobot list
+
+# Show pending Dependabot PRs
+npx dittobot pending
+
+# Scan and auto-approve matching PRs
+npx dittobot scan [--dry-run]
+```
+
+See `.env.example` for the full list of configuration variables.
 
 ## Contributing
 
