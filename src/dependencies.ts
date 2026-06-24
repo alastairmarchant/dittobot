@@ -6,7 +6,7 @@ import {
     compareVersions,
 } from "compare-versions"
 import type { ApprovedVersions } from "./store.js"
-import ApprovalStore, { getStoreProvider } from "./store.js"
+import ApprovalStore from "./store.js"
 import type { components as RestComponents } from "@octokit/openapi-types"
 import type { components as WebhookComponents } from "@octokit/openapi-webhooks-types"
 
@@ -344,10 +344,8 @@ export const captureApproval = async (
     octokit: ProbotOctokit,
     repository: Repository,
     user: string,
+    store: ApprovalStore,
 ): Promise<void> => {
-    const storeProvider = getStoreProvider(octokit)
-    const store = new ApprovalStore(storeProvider)
-
     const config = await store.getConfig()
 
     if (!config.enrolledRepos.includes(repository.name)) {
@@ -390,6 +388,7 @@ export const checkPr = async (
     pr: PrPayload,
     octokit: ProbotOctokit,
     repository: Repository,
+    store: ApprovalStore,
 ): Promise<void> => {
     if (!isDependabotPr(pr)) {
         return
@@ -398,9 +397,6 @@ export const checkPr = async (
     if (pr.state !== "open") {
         return
     }
-
-    const storeProvider = getStoreProvider(octokit)
-    const store = new ApprovalStore(storeProvider)
 
     const config = await store.getConfig()
 

@@ -1,7 +1,11 @@
 import { Probot } from "probot"
 import { isDependabotPr, checkPr, captureApproval } from "./dependencies.js"
+import { StoreRegistry } from "./registry.js"
+import { env } from "./env.js"
 
 export default (app: Probot): void => {
+    const registry = new StoreRegistry(env)
+
     app.on(
         [
             "pull_request.opened",
@@ -13,10 +17,13 @@ export default (app: Probot): void => {
                 return
             }
 
+            const org = context.payload.repository.owner.login
+            const store = await registry.getStore(org, context.octokit)
             await checkPr(
                 context.payload.pull_request,
                 context.octokit,
                 context.payload.repository,
+                store,
             )
         },
     )
@@ -34,12 +41,15 @@ export default (app: Probot): void => {
             return
         }
 
+        const org = context.payload.repository.owner.login
+        const store = await registry.getStore(org, context.octokit)
         const user = context.payload.sender.login
         await captureApproval(
             context.payload.pull_request,
             context.octokit,
             context.payload.repository,
             user,
+            store,
         )
     })
 
@@ -55,6 +65,8 @@ export default (app: Probot): void => {
         if (!isDependabotPr(context.payload.pull_request)) {
             return
         }
+        const org = context.payload.repository.owner.login
+        const store = await registry.getStore(org, context.octokit)
         const user =
             context.payload.review.user?.login ?? context.payload.sender.login
         await captureApproval(
@@ -62,6 +74,7 @@ export default (app: Probot): void => {
             context.octokit,
             context.payload.repository,
             user,
+            store,
         )
     })
 
@@ -71,9 +84,13 @@ export default (app: Probot): void => {
         }
 
         const pr = context.payload.check_suite.pull_requests[0] as
-            | { number: number }
+            | { number: number; head: { ref: string } }
             | undefined
         if (!pr) {
+            return
+        }
+
+        if (!pr.head.ref.startsWith("dependabot/")) {
             return
         }
 
@@ -88,6 +105,22 @@ export default (app: Probot): void => {
             return
         }
 
-        await checkPr(prData, context.octokit, context.payload.repository)
+        const org = context.payload.repository.owner.login
+        const store = await registry.getStore(org, context.octokit)
+        await checkPr(
+            prData,
+            context.octokit,
+            context.payload.repository,
+            store,
+        )
+    })
+
+    app.on("installation.created", async (context) => {
+        const account = context.payload.installation.account
+        if (!account || !("login" in account)) {
+            return
+        }
+        const org = (account as { login: string }).login
+        await registry.getStore(org, context.octokit)
     })
 }

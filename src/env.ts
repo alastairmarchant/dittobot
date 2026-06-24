@@ -2,7 +2,7 @@ import { z } from "zod"
 
 const GithubStoreConfigSchema = z.object({
     TYPE: z.literal("github"),
-    REPO: z.string(),
+    DEFAULT_REPO: z.string(),
 })
 
 export type GithubStoreConfig = z.infer<typeof GithubStoreConfigSchema>
@@ -16,15 +16,6 @@ export type LocalStoreConfig = z.infer<typeof LocalStoreConfigSchema>
 
 const MemoryStoreConfigSchema = z.object({
     TYPE: z.literal("memory"),
-    ORG: z.string(),
-    ENROLLED_REPOS: z.string().transform((str) =>
-        str
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0),
-    ),
-    MERGE_STRATEGY: z.enum(["squash", "merge", "rebase"]).default("squash"),
-    REQUIRE_CI: z.coerce.boolean().default(true),
 })
 
 export type MemoryStoreConfig = z.infer<typeof MemoryStoreConfigSchema>

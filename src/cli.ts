@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from "@commander-js/extra-typings"
-import ApprovalStore, { getStoreProvider } from "./store.js"
+import ApprovalStore from "./store.js"
 import {
     extractPrDependencies,
     isDependabotPr,
@@ -12,6 +12,8 @@ import type { Dependency } from "./dependencies.js"
 import { ProbotOctokit } from "probot"
 import { fileURLToPath } from "node:url"
 import { realpathSync } from "node:fs"
+import { StoreRegistry } from "./registry.js"
+import { env } from "./env.js"
 
 const program = new Command()
 
@@ -23,6 +25,7 @@ program
         "Automatically approves and merges Dependabot PRs across multiple repos once a dependency version has been manually reviewed in any single repo.",
     )
     .version("1.0.0")
+    .option("--org <org>", "The GitHub org to manage")
 
 export async function approveAction(
     store: ApprovalStore,
@@ -148,6 +151,17 @@ export async function unenrollAction(
     console.log(`Unenrolled ${repo}.`)
 }
 
+const getStoreForOrg = async (
+    octokit: ProbotOctokit,
+): Promise<ApprovalStore> => {
+    const org = (program.opts() as { org?: string }).org
+    if (!org) {
+        throw new Error("--org option is required")
+    }
+    const registry = new StoreRegistry(env)
+    return registry.getStore(org, octokit)
+}
+
 program
     .command("approve")
     .description("Approve a dependency version")
@@ -182,8 +196,7 @@ program
                     token: process.env.GITHUB_PAT_TOKEN,
                 },
             })
-            const storeProvider = getStoreProvider(octokit)
-            const store = new ApprovalStore(storeProvider)
+            const store = await getStoreForOrg(octokit)
 
             const dep: Dependency = {
                 name: dependency,
@@ -205,9 +218,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const storeProvider = getStoreProvider(octokit)
-        const store = new ApprovalStore(storeProvider)
-
+        const store = await getStoreForOrg(octokit)
         await listAction(store)
     })
 
@@ -220,10 +231,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-
-        const storeProvider = getStoreProvider(octokit)
-        const store = new ApprovalStore(storeProvider)
-
+        const store = await getStoreForOrg(octokit)
         await pendingAction(store, octokit)
     })
 
@@ -237,8 +245,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const storeProvider = getStoreProvider(octokit)
-        const store = new ApprovalStore(storeProvider)
+        const store = await getStoreForOrg(octokit)
         await scanAction(store, octokit, options.dryRun ?? false)
     })
 
@@ -252,9 +259,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const storeProvider = getStoreProvider(octokit)
-        const store = new ApprovalStore(storeProvider)
-
+        const store = await getStoreForOrg(octokit)
         await enrollAction(store, repository)
     })
 
@@ -268,9 +273,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const storeProvider = getStoreProvider(octokit)
-        const store = new ApprovalStore(storeProvider)
-
+        const store = await getStoreForOrg(octokit)
         await unenrollAction(store, repository)
     })
 

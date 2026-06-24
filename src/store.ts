@@ -1,12 +1,5 @@
 import type { Dependency } from "./dependencies.js"
 import type { ProbotOctokit } from "probot"
-import { env } from "./env.js"
-import type {
-    GithubStoreConfig,
-    LocalStoreConfig,
-    MemoryStoreConfig,
-    StoreProviderConfig,
-} from "./env.js"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import { ConfigError } from "./errors.js"
@@ -108,8 +101,8 @@ export class LocalFileStoreProvider implements VersionStoreProvider {
     private readonly _approvalFile: string
     private readonly _auditFile: string
 
-    constructor(config: LocalStoreConfig) {
-        const basePath = path.resolve(config.PATH)
+    constructor(dirPath: string) {
+        const basePath = path.resolve(dirPath)
         this._configFile = path.join(basePath, "config.json")
         this._approvalFile = path.join(basePath, "approved-versions.json")
         this._auditFile = path.join(basePath, "audit-log.json")
@@ -235,11 +228,11 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
 
     constructor(
         private readonly _octokit: ProbotOctokit,
-        config: GithubStoreConfig,
+        owner: string,
+        repoName: string,
     ) {
-        const [owner, repo] = config.REPO.split("/")
-        this._owner = owner!
-        this._repo = repo!
+        this._owner = owner
+        this._repo = repoName
     }
 
     get approvalStoreLink(): string {
@@ -247,7 +240,8 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
     }
 
     async getConfig(): Promise<StoreConfig> {
-        const { data } = await this._fetchJsonFile(this._configFile)
+        const { data, sha } = await this._fetchJsonFile(this._configFile)
+        this._configSha = sha
         return data as unknown as StoreConfig
     }
 
@@ -402,12 +396,10 @@ export class MemoryVersionStoreProvider implements VersionStoreProvider {
     private readonly _approvedVersions: ApprovedVersions = {}
     private readonly _auditLog: AuditEvent[] = []
 
-    constructor(config: MemoryStoreConfig) {
+    constructor(initialConfig: StoreConfig) {
         this._config = {
-            org: config.ORG,
-            enrolledRepos: config.ENROLLED_REPOS,
-            mergeStrategy: config.MERGE_STRATEGY,
-            requireCi: config.REQUIRE_CI,
+            ...initialConfig,
+            enrolledRepos: [...initialConfig.enrolledRepos],
         }
     }
 
@@ -532,19 +524,12 @@ class ApprovalStore {
     }
 }
 
-export function getStoreProvider(octokit: ProbotOctokit): VersionStoreProvider {
-    const storeConfig = env.STORE
-    switch (storeConfig.TYPE) {
-        case "github":
-            return new GithubVersionStoreProvider(octokit, storeConfig)
-        case "local":
-            return new LocalFileStoreProvider(storeConfig)
-        case "memory":
-            return new MemoryVersionStoreProvider(storeConfig)
-        default:
-            throw new ConfigError(
-                `Unsupported store type: ${(storeConfig as StoreProviderConfig).TYPE}`,
-            )
+export function createDefaultStoreConfig(org: string): StoreConfig {
+    return {
+        org,
+        enrolledRepos: [],
+        mergeStrategy: "squash",
+        requireCi: true,
     }
 }
 
