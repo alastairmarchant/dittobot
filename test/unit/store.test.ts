@@ -7,10 +7,6 @@ vi.mock("../../src/env.js", () => ({
     env: {
         STORE: {
             TYPE: "memory",
-            ORG: "test",
-            ENROLLED_REPOS: [],
-            MERGE_STRATEGY: "squash",
-            REQUIRE_CI: true,
         },
         STRICT_VERSIONS: true,
     },
@@ -21,9 +17,8 @@ import ApprovalStore, {
     GithubVersionStoreProvider,
     MemoryVersionStoreProvider,
     ensurePackageInVersions,
-    getStoreProvider,
+    createDefaultStoreConfig,
 } from "../../src/store.js"
-import { env } from "../../src/env.js"
 import { ConfigError } from "../../src/errors.js"
 import type {
     StoreConfig,
@@ -41,12 +36,11 @@ const makeAuditEvent = (action = "test-action"): AuditEvent => ({
     timestamp: new Date().toISOString(),
 })
 
-const makeMemoryConfig = () => ({
-    TYPE: "memory" as const,
-    ORG: "test-org",
-    ENROLLED_REPOS: [],
-    MERGE_STRATEGY: "squash" as const,
-    REQUIRE_CI: true,
+const makeStoreConfig = (): StoreConfig => ({
+    org: "test-org",
+    enrolledRepos: [],
+    mergeStrategy: "squash",
+    requireCi: true,
 })
 
 // GitHub mock helpers
@@ -99,14 +93,35 @@ describe("ensurePackageInVersions", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 2. MemoryVersionStoreProvider
+// 2. createDefaultStoreConfig
+// ---------------------------------------------------------------------------
+
+describe("createDefaultStoreConfig", () => {
+    test("returns StoreConfig with correct defaults for given org", () => {
+        const config = createDefaultStoreConfig("acme-org")
+        expect(config).toEqual({
+            org: "acme-org",
+            enrolledRepos: [],
+            mergeStrategy: "squash",
+            requireCi: true,
+        })
+    })
+
+    test("org field matches the provided org name", () => {
+        const config = createDefaultStoreConfig("my-corp")
+        expect(config.org).toBe("my-corp")
+    })
+})
+
+// ---------------------------------------------------------------------------
+// 3. MemoryVersionStoreProvider
 // ---------------------------------------------------------------------------
 
 describe("MemoryVersionStoreProvider", () => {
     let provider: MemoryVersionStoreProvider
 
     beforeEach(() => {
-        provider = new MemoryVersionStoreProvider(makeMemoryConfig())
+        provider = new MemoryVersionStoreProvider(makeStoreConfig())
     })
 
     test("getConfig returns StoreConfig built from constructor args", async () => {
@@ -172,6 +187,20 @@ describe("MemoryVersionStoreProvider", () => {
         expect(config.org).toBe("new-org")
     })
 
+    test("constructor deep-copies enrolledRepos so external mutation does not affect the provider", async () => {
+        const repos = ["repo-a"]
+        const storeProvider = new MemoryVersionStoreProvider({
+            org: "test-org",
+            enrolledRepos: repos,
+            mergeStrategy: "squash",
+            requireCi: true,
+        })
+        repos.push("repo-b")
+        const config = await storeProvider.getConfig()
+        expect(config.enrolledRepos).toEqual(["repo-a"])
+        expect(config.enrolledRepos).not.toContain("repo-b")
+    })
+
     test("logEvent resolves without throwing", async () => {
         const event = makeAuditEvent("version.approved")
         await expect(provider.logEvent(event)).resolves.toBeUndefined()
@@ -179,7 +208,7 @@ describe("MemoryVersionStoreProvider", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. LocalFileStoreProvider
+// 4. LocalFileStoreProvider
 // ---------------------------------------------------------------------------
 
 describe("LocalFileStoreProvider", () => {
@@ -188,7 +217,7 @@ describe("LocalFileStoreProvider", () => {
 
     beforeEach(async () => {
         tmpDir = await mkdtemp(path.join(tmpdir(), "dittobot-test-"))
-        provider = new LocalFileStoreProvider({ TYPE: "local", PATH: tmpDir })
+        provider = new LocalFileStoreProvider(tmpDir)
     })
 
     afterEach(async () => {
@@ -286,7 +315,7 @@ describe("LocalFileStoreProvider", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 4. GithubVersionStoreProvider
+// 5. GithubVersionStoreProvider
 // ---------------------------------------------------------------------------
 
 const validStoreConfig: StoreConfig = {
@@ -311,10 +340,11 @@ describe("GithubVersionStoreProvider", () => {
 
     beforeEach(() => {
         mockOctokit = makeMockOctokit()
-        provider = new GithubVersionStoreProvider(mockOctokit as never, {
-            TYPE: "github",
-            REPO: "owner/repo",
-        })
+        provider = new GithubVersionStoreProvider(
+            mockOctokit as never,
+            "owner",
+            "repo",
+        )
     })
 
     test("getConfig returns valid StoreConfig from mocked getContent", async () => {
@@ -324,6 +354,16 @@ describe("GithubVersionStoreProvider", () => {
 
         const config = await provider.getConfig()
         expect(config).toEqual(validStoreConfig)
+    })
+
+    test("getConfig stores blob SHA in _configSha for subsequent updateConfig calls", async () => {
+        mockOctokit.rest.repos.getContent.mockResolvedValueOnce(
+            makeContentResponse(validStoreConfig, "sha-from-get"),
+        )
+
+        await provider.getConfig()
+
+        expect(provider.configSha).toBe("sha-from-get")
     })
 
     test("updateConfig patches field and updates configSha", async () => {
@@ -345,6 +385,7 @@ describe("GithubVersionStoreProvider", () => {
         const callArgs =
             mockOctokit.rest.repos.createOrUpdateFileContents.mock.calls[0]![0]
         expect(callArgs.message).toContain("mergeStrategy")
+        expect(callArgs.sha).toBe("oldsha")
     })
 
     test("updateConfig throws when createOrUpdateFileContents returns no sha in content", async () => {
@@ -563,66 +604,11 @@ describe("GithubVersionStoreProvider", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 6. getStoreProvider
-// ---------------------------------------------------------------------------
-
-describe("getStoreProvider", () => {
-    const mockOctokit = {} as never
-
-    afterEach(() => {
-        vi.restoreAllMocks()
-    })
-
-    test("TYPE=memory returns MemoryVersionStoreProvider", () => {
-        const result = getStoreProvider(mockOctokit)
-        expect(result).toBeInstanceOf(MemoryVersionStoreProvider)
-    })
-
-    test("TYPE=local returns LocalFileStoreProvider", () => {
-        const saved = env.STORE
-        ;(env as unknown as { STORE: unknown }).STORE = {
-            TYPE: "local",
-            PATH: "/tmp",
-        }
-        try {
-            const result = getStoreProvider(mockOctokit)
-            expect(result).toBeInstanceOf(LocalFileStoreProvider)
-        } finally {
-            ;(env as unknown as { STORE: unknown }).STORE = saved
-        }
-    })
-
-    test("TYPE=github returns GithubVersionStoreProvider", () => {
-        const saved = env.STORE
-        ;(env as unknown as { STORE: unknown }).STORE = {
-            TYPE: "github",
-            REPO: "owner/repo",
-        }
-        try {
-            const result = getStoreProvider(mockOctokit)
-            expect(result).toBeInstanceOf(GithubVersionStoreProvider)
-        } finally {
-            ;(env as unknown as { STORE: unknown }).STORE = saved
-        }
-    })
-
-    test("unknown TYPE throws ConfigError", () => {
-        const saved = env.STORE
-        ;(env as unknown as { STORE: unknown }).STORE = { TYPE: "redis" }
-        try {
-            expect(() => getStoreProvider(mockOctokit)).toThrow(ConfigError)
-        } finally {
-            ;(env as unknown as { STORE: unknown }).STORE = saved
-        }
-    })
-})
-
-// ---------------------------------------------------------------------------
-// 5. ApprovalStore (wrapping MemoryVersionStoreProvider)
+// 6. ApprovalStore (wrapping MemoryVersionStoreProvider)
 // ---------------------------------------------------------------------------
 
 const makeProvider = (): VersionStoreProvider => {
-    return new MemoryVersionStoreProvider(makeMemoryConfig())
+    return new MemoryVersionStoreProvider(makeStoreConfig())
 }
 
 describe("ApprovalStore", () => {

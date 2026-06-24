@@ -14,7 +14,8 @@ import prClosedPayload from "./fixtures/pull_request.closed.json" with { type: "
 import prReviewSubmittedPayload from "./fixtures/pull_request_review.submitted.json" with { type: "json" }
 import checkSuiteCompletedPayload from "./fixtures/check_suite.completed.json" with { type: "json" }
 import ApprovalStore from "../src/store.js"
-import { MemoryVersionStoreProvider, getStoreProvider } from "../src/store.js"
+import { MemoryVersionStoreProvider } from "../src/store.js"
+import { StoreRegistry } from "../src/registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -60,22 +61,27 @@ const deepClone = <T>(obj: T): T => {
     return JSON.parse(JSON.stringify(obj)) as T
 }
 
-vi.mock("../src/store.js", async () => {
-    const store =
-        await vi.importActual<typeof import("../src/store.js")>(
-            "../src/store.js",
-        )
-    return {
-        ...store,
-        getStoreProvider: vi.fn(),
-    }
-})
+// ---------------------------------------------------------------------------
+// StoreRegistry mock
+// ---------------------------------------------------------------------------
+
+const mockGetStore = vi.fn()
+
+vi.mock("../src/registry.js", () => ({
+    StoreRegistry: vi.fn().mockImplementation(() => ({
+        getStore: mockGetStore,
+    })),
+}))
 
 describe("DittoBot app", () => {
     let probot: Probot
     let mockStoreProvider: MemoryVersionStoreProvider
 
     beforeEach(async () => {
+        vi.mocked(StoreRegistry).mockImplementation(() => ({
+            getStore: mockGetStore,
+        }))
+
         nock.disableNetConnect()
         probot = new Probot({
             appId: 123,
@@ -92,11 +98,10 @@ describe("DittoBot app", () => {
 
         // Create a fresh store for each test
         mockStoreProvider = new MemoryVersionStoreProvider({
-            TYPE: "memory",
-            ORG: "octocat",
-            ENROLLED_REPOS: ["Team Environment", "Another-Repo"],
-            MERGE_STRATEGY: "squash",
-            REQUIRE_CI: false,
+            org: "octocat",
+            enrolledRepos: ["Team Environment", "Another-Repo"],
+            mergeStrategy: "squash",
+            requireCi: false,
         })
         // Pre-load ruff 0.15.11 for tests that need it
         await mockStoreProvider.addApprovedVersion(
@@ -107,7 +112,7 @@ describe("DittoBot app", () => {
             "octocat/Hello-World",
             28,
         )
-        vi.mocked(getStoreProvider).mockReturnValue(mockStoreProvider)
+        mockGetStore.mockResolvedValue(new ApprovalStore(mockStoreProvider))
     })
 
     test.each([
@@ -509,6 +514,17 @@ _This PR was automatically approved because these versions were manually reviewe
         expect(mock.pendingMocks()).toStrictEqual([])
     })
 
+    test("Skips check_suite.completed when branch does not start with dependabot/", async () => {
+        const mock = nock("https://api.github.com")
+
+        const payload = deepClone(checkSuiteCompletedPayload)
+        payload.check_suite.pull_requests[0]!.head.ref = "feature/some-work"
+
+        await probot.receive({ name: "check_suite", payload })
+
+        expect(mock.pendingMocks()).toStrictEqual([])
+    })
+
     test("Skips check_suite.completed when not a dependabot PR", async () => {
         const mock = nock("https://api.github.com")
             .post("/app/installations/1/access_tokens")
@@ -613,6 +629,143 @@ _This PR was automatically approved because these versions were manually reviewe
 
         await probot.receive({ name: "check_suite", payload })
 
+        expect(mock.pendingMocks()).toStrictEqual([])
+    })
+
+    test("installation.created bootstraps the store for the new org", async () => {
+        const mock = nock("https://api.github.com")
+
+        const payload = {
+            action: "created",
+            installation: {
+                id: 2,
+                node_id: "MDQ6VXNlcjU4MzIzMw==",
+                account: {
+                    login: "new-org",
+                    id: 999,
+                    node_id: "MDQ6VXNlcjU4MzIzMw==",
+                    avatar_url: "",
+                    gravatar_id: "",
+                    url: "",
+                    html_url: "",
+                    followers_url: "",
+                    following_url: "",
+                    gists_url: "",
+                    starred_url: "",
+                    subscriptions_url: "",
+                    organizations_url: "",
+                    repos_url: "",
+                    events_url: "",
+                    received_events_url: "",
+                    type: "Organization",
+                    site_admin: false,
+                },
+                app_id: 123,
+                app_slug: "dittobot",
+                target_id: 999,
+                target_type: "Organization",
+                permissions: {},
+                events: [],
+                created_at: "2024-01-01T00:00:00Z",
+                updated_at: "2024-01-01T00:00:00Z",
+                single_file_name: null,
+                has_multiple_single_files: false,
+                single_file_paths: [],
+                repository_selection: "all",
+                access_tokens_url: "",
+                repositories_url: "",
+                html_url: "",
+                suspended_by: null,
+                suspended_at: null,
+            },
+            repositories: [],
+            sender: {
+                login: "new-org",
+                id: 999,
+                node_id: "MDQ6VXNlcjU4MzIzMw==",
+                avatar_url: "",
+                gravatar_id: "",
+                url: "",
+                html_url: "",
+                followers_url: "",
+                following_url: "",
+                gists_url: "",
+                starred_url: "",
+                subscriptions_url: "",
+                organizations_url: "",
+                repos_url: "",
+                events_url: "",
+                received_events_url: "",
+                type: "User",
+                site_admin: false,
+            },
+        }
+
+        await probot.receive({
+            name: "installation",
+            payload: payload as never,
+        })
+
+        expect(mockGetStore).toHaveBeenCalledWith("new-org", expect.anything())
+        expect(mock.pendingMocks()).toStrictEqual([])
+    })
+
+    test("installation.created skips when account has no login", async () => {
+        const mock = nock("https://api.github.com")
+
+        const payload = {
+            action: "created",
+            installation: {
+                id: 3,
+                node_id: "MDQ6VXNlcjU4MzIzNA==",
+                account: {} as never,
+                app_id: 123,
+                app_slug: "dittobot",
+                target_id: 888,
+                target_type: "Organization",
+                permissions: {},
+                events: [],
+                created_at: "2024-01-01T00:00:00Z",
+                updated_at: "2024-01-01T00:00:00Z",
+                single_file_name: null,
+                has_multiple_single_files: false,
+                single_file_paths: [],
+                repository_selection: "all",
+                access_tokens_url: "",
+                repositories_url: "",
+                html_url: "",
+                suspended_by: null,
+                suspended_at: null,
+            },
+            repositories: [],
+            sender: {
+                login: "someone",
+                id: 888,
+                node_id: "MDQ6VXNlcjU4MzIzNA==",
+                avatar_url: "",
+                gravatar_id: "",
+                url: "",
+                html_url: "",
+                followers_url: "",
+                following_url: "",
+                gists_url: "",
+                starred_url: "",
+                subscriptions_url: "",
+                organizations_url: "",
+                repos_url: "",
+                events_url: "",
+                received_events_url: "",
+                type: "User",
+                site_admin: false,
+            },
+        }
+
+        await probot.receive({
+            name: "installation",
+            payload: payload as never,
+        })
+
+        expect(mockGetStore).not.toHaveBeenCalled()
         expect(mock.pendingMocks()).toStrictEqual([])
     })
 

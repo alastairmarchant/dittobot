@@ -2,15 +2,17 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest"
 
 vi.mock("../../src/env.js", () => ({
     env: {
-        STORE: {
-            TYPE: "memory",
-            ORG: "test-org",
-            ENROLLED_REPOS: [],
-            MERGE_STRATEGY: "squash",
-            REQUIRE_CI: true,
-        },
+        STORE: { TYPE: "memory" },
         STRICT_VERSIONS: true,
     },
+}))
+
+const mockGetStore = vi.fn()
+
+vi.mock("../../src/registry.js", () => ({
+    StoreRegistry: vi.fn().mockImplementation(() => ({
+        getStore: mockGetStore,
+    })),
 }))
 
 const mockOctokitInstance = {
@@ -28,25 +30,6 @@ vi.mock("probot", async () => {
     return { ...actual, ProbotOctokit: vi.fn(() => mockOctokitInstance) }
 })
 
-vi.mock("../../src/store.js", async () => {
-    const actual =
-        await vi.importActual<typeof import("../../src/store.js")>(
-            "../../src/store.js",
-        )
-    return {
-        ...actual,
-        getStoreProvider: vi.fn().mockReturnValue(
-            new actual.MemoryVersionStoreProvider({
-                TYPE: "memory",
-                ORG: "test-org",
-                ENROLLED_REPOS: [],
-                MERGE_STRATEGY: "squash",
-                REQUIRE_CI: true,
-            }),
-        ),
-    }
-})
-
 vi.mock("../../src/dependencies.js", async () => {
     const actual = await vi.importActual<
         typeof import("../../src/dependencies.js")
@@ -58,6 +41,7 @@ vi.mock("../../src/dependencies.js", async () => {
 })
 
 import ApprovalStore, { MemoryVersionStoreProvider } from "../../src/store.js"
+import { StoreRegistry } from "../../src/registry.js"
 import {
     approveAction,
     listAction,
@@ -76,11 +60,10 @@ import type { Dependency } from "../../src/dependencies.js"
 
 const makeStore = (enrolledRepos: string[] = []) => {
     const provider = new MemoryVersionStoreProvider({
-        TYPE: "memory",
-        ORG: "test-org",
-        ENROLLED_REPOS: enrolledRepos,
-        MERGE_STRATEGY: "squash",
-        REQUIRE_CI: true,
+        org: "test-org",
+        enrolledRepos,
+        mergeStrategy: "squash",
+        requireCi: true,
     })
     return new ApprovalStore(provider)
 }
@@ -375,11 +358,10 @@ updated-dependencies:
 `
         // Store has ruff approved — PR will be READY
         const provider = new MemoryVersionStoreProvider({
-            TYPE: "memory",
-            ORG: "test-org",
-            ENROLLED_REPOS: ["my-org/repo-a"],
-            MERGE_STRATEGY: "squash",
-            REQUIRE_CI: true,
+            org: "test-org",
+            enrolledRepos: ["my-org/repo-a"],
+            mergeStrategy: "squash",
+            requireCi: true,
         })
         await provider.addApprovedVersion(
             "ruff",
@@ -552,6 +534,10 @@ describe("commander wiring", () => {
         consoleSpy = vi
             .spyOn(console, "log")
             .mockImplementation(() => undefined)
+        vi.mocked(StoreRegistry).mockImplementation(() => ({
+            getStore: mockGetStore,
+        }))
+        mockGetStore.mockResolvedValue(makeStore())
     })
 
     afterEach(() => {
@@ -560,18 +546,25 @@ describe("commander wiring", () => {
     })
 
     test("list command invokes listAction via real store", async () => {
-        await program.parseAsync(["node", "cli", "list"])
+        await program.parseAsync(["node", "cli", "--org", "test-org", "list"])
         // listAction calls store.getApprovedVersions — no error means wiring works
         expect(consoleSpy).not.toHaveBeenCalled() // empty store
     })
 
     test("scan command invokes scanAction (dryRun=false)", async () => {
-        await program.parseAsync(["node", "cli", "scan"])
+        await program.parseAsync(["node", "cli", "--org", "test-org", "scan"])
         expect(checkPendingPrs).toHaveBeenCalledOnce()
     })
 
     test("scan command passes --dry-run flag", async () => {
-        await program.parseAsync(["node", "cli", "scan", "--dry-run"])
+        await program.parseAsync([
+            "node",
+            "cli",
+            "--org",
+            "test-org",
+            "scan",
+            "--dry-run",
+        ])
         expect(checkPendingPrs).toHaveBeenCalledWith(
             expect.anything(),
             expect.any(String),
@@ -581,14 +574,28 @@ describe("commander wiring", () => {
     })
 
     test("enroll command invokes enrollAction", async () => {
-        await program.parseAsync(["node", "cli", "enroll", "my-org/my-repo"])
+        await program.parseAsync([
+            "node",
+            "cli",
+            "--org",
+            "test-org",
+            "enroll",
+            "my-org/my-repo",
+        ])
         expect(consoleSpy).toHaveBeenCalledWith(
             expect.stringContaining("Enrolled"),
         )
     })
 
     test("unenroll command invokes unenrollAction for missing repo", async () => {
-        await program.parseAsync(["node", "cli", "unenroll", "my-org/missing"])
+        await program.parseAsync([
+            "node",
+            "cli",
+            "--org",
+            "test-org",
+            "unenroll",
+            "my-org/missing",
+        ])
         expect(consoleSpy).toHaveBeenCalledWith(
             expect.stringContaining("not enrolled"),
         )
@@ -598,6 +605,8 @@ describe("commander wiring", () => {
         await program.parseAsync([
             "node",
             "cli",
+            "--org",
+            "test-org",
             "approve",
             "lodash",
             "--dep-version",
@@ -611,15 +620,35 @@ describe("commander wiring", () => {
     test("approve command throws when --dep-version or --ecosystem is missing", async () => {
         program.exitOverride()
         await expect(
-            program.parseAsync(["node", "cli", "approve", "lodash"]),
+            program.parseAsync([
+                "node",
+                "cli",
+                "--org",
+                "test-org",
+                "approve",
+                "lodash",
+            ]),
         ).rejects.toThrow()
     })
 
     test("pending command invokes pendingAction", async () => {
-        await program.parseAsync(["node", "cli", "pending"])
+        await program.parseAsync([
+            "node",
+            "cli",
+            "--org",
+            "test-org",
+            "pending",
+        ])
         // No error — wiring and empty store handled correctly
         expect(consoleSpy).toHaveBeenCalledWith(
             expect.stringContaining("Total pending PRs"),
         )
+    })
+
+    test("commands fail when --org is not provided", async () => {
+        program.exitOverride()
+        await expect(
+            program.parseAsync(["node", "cli", "list"]),
+        ).rejects.toThrow()
     })
 })

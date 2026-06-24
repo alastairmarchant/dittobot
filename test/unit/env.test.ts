@@ -9,11 +9,11 @@ describe("nestObject", () => {
     })
 
     test("flat object with __ separators → correct nested structure", () => {
-        const result = nestObject({ STORE__TYPE: "memory", STORE__ORG: "acme" })
+        const result = nestObject({ STORE__TYPE: "memory", STORE__FOO: "bar" })
         expect(result).toEqual({
             STORE: {
                 TYPE: "memory",
-                ORG: "acme",
+                FOO: "bar",
             },
         })
     })
@@ -45,16 +45,9 @@ describe("parseEnv", () => {
         vi.unstubAllEnvs()
     })
 
-    test("valid memory store config", () => {
+    test("valid memory store config — only TYPE required", () => {
         vi.stubEnv("DITTOBOT_STRICT_VERSIONS", "true")
         vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
-        vi.stubEnv("DITTOBOT_STORE__ORG", "acme-org")
-        vi.stubEnv(
-            "DITTOBOT_STORE__ENROLLED_REPOS",
-            "acme-org/repo-a,acme-org/repo-b",
-        )
-        vi.stubEnv("DITTOBOT_STORE__MERGE_STRATEGY", "squash")
-        vi.stubEnv("DITTOBOT_STORE__REQUIRE_CI", "true")
 
         const result = parseEnv()
 
@@ -62,10 +55,6 @@ describe("parseEnv", () => {
             STRICT_VERSIONS: true,
             STORE: {
                 TYPE: "memory",
-                ORG: "acme-org",
-                ENROLLED_REPOS: ["acme-org/repo-a", "acme-org/repo-b"],
-                MERGE_STRATEGY: "squash",
-                REQUIRE_CI: true,
             },
         })
     })
@@ -84,21 +73,19 @@ describe("parseEnv", () => {
 
     test("valid github store config", () => {
         vi.stubEnv("DITTOBOT_STORE__TYPE", "github")
-        vi.stubEnv("DITTOBOT_STORE__REPO", "org/repo")
+        vi.stubEnv("DITTOBOT_STORE__DEFAULT_REPO", ".dittobot-store")
 
         const result = parseEnv()
 
         expect(result.STORE).toEqual({
             TYPE: "github",
-            REPO: "org/repo",
+            DEFAULT_REPO: ".dittobot-store",
         })
     })
 
     test("STRICT_VERSIONS=false → STRICT_VERSIONS is false", () => {
         vi.stubEnv("DITTOBOT_STRICT_VERSIONS", "false")
         vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
-        vi.stubEnv("DITTOBOT_STORE__ORG", "acme-org")
-        vi.stubEnv("DITTOBOT_STORE__ENROLLED_REPOS", "acme-org/repo-a")
 
         const result = parseEnv()
 
@@ -108,28 +95,16 @@ describe("parseEnv", () => {
     test("STRICT_VERSIONS=true → STRICT_VERSIONS is true", () => {
         vi.stubEnv("DITTOBOT_STRICT_VERSIONS", "true")
         vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
-        vi.stubEnv("DITTOBOT_STORE__ORG", "acme-org")
-        vi.stubEnv("DITTOBOT_STORE__ENROLLED_REPOS", "acme-org/repo-a")
 
         const result = parseEnv()
 
         expect(result.STRICT_VERSIONS).toBe(true)
     })
 
-    test("missing required field (STORE__ORG) → ZodError mentioning ORG", () => {
-        vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
-        vi.stubEnv("DITTOBOT_STORE__ORG", undefined)
-        vi.stubEnv("DITTOBOT_STORE__ENROLLED_REPOS", undefined)
+    test("github store missing DEFAULT_REPO → ZodError", () => {
+        vi.stubEnv("DITTOBOT_STORE__TYPE", "github")
 
-        let caught: unknown
-        try {
-            parseEnv()
-        } catch (e) {
-            caught = e
-        }
-        expect(caught).toBeInstanceOf(ZodError)
-        const issues = (caught as ZodError).issues
-        expect(issues.some((i) => i.path.includes("ORG"))).toBe(true)
+        expect(() => parseEnv()).toThrow(ZodError)
     })
 
     test("invalid STORE__TYPE=unknown → throws ZodError", () => {

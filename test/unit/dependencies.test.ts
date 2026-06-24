@@ -2,35 +2,10 @@ import { describe, test, expect, vi } from "vitest"
 
 vi.mock("../../src/env.js", () => ({
     env: {
-        STORE: {
-            TYPE: "memory",
-            ORG: "test",
-            ENROLLED_REPOS: [],
-            MERGE_STRATEGY: "squash",
-            REQUIRE_CI: true,
-        },
+        STORE: { TYPE: "memory" },
         STRICT_VERSIONS: true,
     },
 }))
-
-vi.mock("../../src/store.js", async () => {
-    const store =
-        await vi.importActual<typeof import("../../src/store.js")>(
-            "../../src/store.js",
-        )
-    return {
-        ...store,
-        getStoreProvider: vi.fn().mockReturnValue(
-            new store.MemoryVersionStoreProvider({
-                TYPE: "memory",
-                ORG: "test",
-                ENROLLED_REPOS: [],
-                MERGE_STRATEGY: "squash",
-                REQUIRE_CI: false,
-            }),
-        ),
-    }
-})
 
 import {
     isDependabotPr,
@@ -43,7 +18,7 @@ import {
 } from "../../src/dependencies.js"
 import ApprovalStore, {
     MemoryVersionStoreProvider,
-    getStoreProvider,
+    createDefaultStoreConfig,
 } from "../../src/store.js"
 import type { ApprovedVersions } from "../../src/store.js"
 
@@ -367,11 +342,10 @@ describe("versionIsApproved", () => {
 // ---------------------------------------------------------------------------
 
 const memConfig = (requireCi: boolean) => ({
-    TYPE: "memory" as const,
-    ORG: "org",
-    ENROLLED_REPOS: ["org/my-repo"],
-    MERGE_STRATEGY: "squash" as const,
-    REQUIRE_CI: requireCi,
+    org: "org",
+    enrolledRepos: ["org/my-repo"],
+    mergeStrategy: "squash" as const,
+    requireCi,
 })
 
 const makeDepbotPr = (number = 42) => ({
@@ -614,66 +588,58 @@ describe("captureApproval", () => {
         full_name: `${org}/my-repo`,
     })
 
-    test("returns early when no dependencies can be extracted", async () => {
-        const octokit = {
-            rest: {
-                pulls: {
-                    listCommits: vi.fn().mockResolvedValue({ data: [] }),
-                },
+    const makeOctokitNoCommits = () => ({
+        rest: {
+            pulls: {
+                listCommits: vi.fn().mockResolvedValue({ data: [] }),
             },
-        }
-        const pr = {
-            number: 1,
-            user: { login: "dependabot[bot]" },
-            head: {
-                ref: "dependabot/uv/ruff-0.15.11",
-                repo: { name: "my-repo" },
-            },
-            base: { repo: { name: "my-repo" } },
-        }
-
-        // No API calls beyond listCommits (no store write, no checkPendingPrs)
-        await captureApproval(
-            pr as never,
-            octokit as never,
-            makeRepo() as never,
-            "user",
-        )
+        },
     })
 
-    test("returns early when dependencies list is empty after enrolment check", async () => {
-        vi.mocked(getStoreProvider).mockReturnValueOnce(
-            new MemoryVersionStoreProvider({
-                TYPE: "memory",
-                ORG: "org",
-                ENROLLED_REPOS: ["my-repo"],
-                MERGE_STRATEGY: "squash",
-                REQUIRE_CI: false,
-            }),
+    const makePr = () => ({
+        number: 1,
+        user: { login: "dependabot[bot]" },
+        head: { ref: "dependabot/uv/ruff-0.15.11", repo: { name: "my-repo" } },
+        base: { repo: { name: "my-repo" } },
+    })
+
+    test("returns early when repo is not enrolled", async () => {
+        const store = new ApprovalStore(
+            new MemoryVersionStoreProvider(createDefaultStoreConfig("org")),
         )
-        const octokit = {
-            rest: {
-                pulls: {
-                    listCommits: vi.fn().mockResolvedValue({ data: [] }),
-                },
-            },
-        }
-        const pr = {
-            number: 1,
-            user: { login: "dependabot[bot]" },
-            head: {
-                ref: "dependabot/uv/ruff-0.15.11",
-                repo: { name: "my-repo" },
-            },
-            base: { repo: { name: "my-repo" } },
-        }
 
         await captureApproval(
-            pr as never,
+            makePr() as never,
+            makeOctokitNoCommits() as never,
+            makeRepo() as never,
+            "user",
+            store,
+        )
+        // No listCommits call because repo not enrolled
+        expect(
+            makeOctokitNoCommits().rest.pulls.listCommits as ReturnType<
+                typeof vi.fn
+            >,
+        ).not.toHaveBeenCalled()
+    })
+
+    test("returns early when no dependencies can be extracted (repo enrolled, empty commits)", async () => {
+        const provider = new MemoryVersionStoreProvider({
+            ...createDefaultStoreConfig("org"),
+            enrolledRepos: ["my-repo"],
+        })
+        const store = new ApprovalStore(provider)
+        const octokit = makeOctokitNoCommits()
+
+        await captureApproval(
+            makePr() as never,
             octokit as never,
             makeRepo() as never,
             "user",
+            store,
         )
+        // listCommits was called but returned no commits
+        expect(octokit.rest.pulls.listCommits).toHaveBeenCalledOnce()
     })
 })
 
@@ -700,19 +666,25 @@ describe("checkPr", () => {
         },
     })
 
+    const makeStore = (enrolledRepos: string[] = []) =>
+        new ApprovalStore(
+            new MemoryVersionStoreProvider({
+                ...createDefaultStoreConfig("org"),
+                enrolledRepos,
+            }),
+        )
+
     test("returns early when PR is not from dependabot", async () => {
         const octokit = makeCheckOctokit()
+        const store = makeStore()
         const pr = {
             number: 1,
             user: { login: "octocat" },
-            head: {
-                ref: "main",
-                repo: { name: "my-repo" },
-            },
+            head: { ref: "main", repo: { name: "my-repo" } },
             base: { repo: { name: "my-repo" } },
         }
 
-        await checkPr(pr as never, octokit as never, makeRepo() as never)
+        await checkPr(pr as never, octokit as never, makeRepo() as never, store)
 
         expect(octokit.rest.pulls.listCommits).not.toHaveBeenCalled()
     })
@@ -720,23 +692,7 @@ describe("checkPr", () => {
     test("returns early when no dependencies are extractable", async () => {
         const octokit = makeCheckOctokit()
         octokit.rest.pulls.listCommits.mockResolvedValue({ data: [] })
-        const pr = {
-            number: 1,
-            user: { login: "dependabot[bot]" },
-            head: {
-                ref: "dependabot/uv/ruff-0.15.11",
-                repo: { name: "my-repo" },
-            },
-            base: { repo: { name: "my-repo" } },
-        }
-
-        await checkPr(pr as never, octokit as never, makeRepo() as never)
-
-        expect(octokit.rest.pulls.createReview).not.toHaveBeenCalled()
-    })
-
-    test("returns early when repo is not enrolled", async () => {
-        const octokit = makeCheckOctokit()
+        const store = makeStore(["my-repo"])
         const pr = {
             number: 1,
             state: "open",
@@ -748,7 +704,45 @@ describe("checkPr", () => {
             base: { repo: { name: "my-repo" } },
         }
 
-        await checkPr(pr as never, octokit as never, makeRepo() as never)
+        await checkPr(pr as never, octokit as never, makeRepo() as never, store)
+
+        expect(octokit.rest.pulls.createReview).not.toHaveBeenCalled()
+    })
+
+    test("returns early when repo is not enrolled", async () => {
+        const octokit = makeCheckOctokit()
+        const store = makeStore([]) // my-repo not enrolled
+        const pr = {
+            number: 1,
+            state: "open",
+            user: { login: "dependabot[bot]" },
+            head: {
+                ref: "dependabot/uv/ruff-0.15.11",
+                repo: { name: "my-repo" },
+            },
+            base: { repo: { name: "my-repo" } },
+        }
+
+        await checkPr(pr as never, octokit as never, makeRepo() as never, store)
+
+        expect(octokit.rest.pulls.listCommits).not.toHaveBeenCalled()
+    })
+
+    test("returns early when PR is not open", async () => {
+        const octokit = makeCheckOctokit()
+        const store = makeStore(["my-repo"])
+        const pr = {
+            number: 1,
+            state: "closed",
+            user: { login: "dependabot[bot]" },
+            head: {
+                ref: "dependabot/uv/ruff-0.15.11",
+                repo: { name: "my-repo" },
+            },
+            base: { repo: { name: "my-repo" } },
+        }
+
+        await checkPr(pr as never, octokit as never, makeRepo() as never, store)
 
         expect(octokit.rest.pulls.listCommits).not.toHaveBeenCalled()
     })

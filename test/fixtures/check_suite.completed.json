@@ -114,7 +114,7 @@
                     "sha": "string"
                 },
                 "head": {
-                    "ref": "string",
+                    "ref": "dependabot/uv/ruff-0.15.12",
                     "repo": {
                         "id": 0,
                         "name": "string",
