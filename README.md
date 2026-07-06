@@ -38,7 +38,8 @@ docker run \
 
 ## CLI
 
-DittoBot includes a CLI for managing approved dependency versions. All CLI commands require a GitHub PAT token:
+DittoBot includes a CLI for managing approved dependency versions. All CLI
+commands require a GitHub PAT token:
 
 ```sh
 export GITHUB_PAT_TOKEN=<your-github-pat>
