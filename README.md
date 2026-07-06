@@ -45,7 +45,10 @@ commands require a GitHub PAT token:
 export GITHUB_PAT_TOKEN=<your-github-pat>
 
 # Approve a dependency version
-npx dittobot approve <dependency> --dep-version <version> --ecosystem <npm|pip|...> --user <github-username>
+npx dittobot approve <dependency> \
+  --dep-version <version> \
+  --ecosystem <npm|pip|...> \
+  --user <github-username>
 
 # List approved versions
 npx dittobot list
