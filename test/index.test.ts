@@ -68,9 +68,9 @@ const deepClone = <T>(obj: T): T => {
 const mockGetStore = vi.fn()
 
 vi.mock("../src/registry.js", () => ({
-    StoreRegistry: vi.fn().mockImplementation(() => ({
-        getStore: mockGetStore,
-    })),
+    StoreRegistry: vi.fn(function () {
+        return { getStore: mockGetStore }
+    }),
 }))
 
 describe("DittoBot app", () => {
@@ -78,9 +78,9 @@ describe("DittoBot app", () => {
     let mockStoreProvider: MemoryVersionStoreProvider
 
     beforeEach(async () => {
-        vi.mocked(StoreRegistry).mockImplementation(() => ({
-            getStore: mockGetStore,
-        }))
+        vi.mocked(StoreRegistry).mockImplementation(function () {
+            return { getStore: mockGetStore }
+        })
 
         nock.disableNetConnect()
         probot = new Probot({

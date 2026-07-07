@@ -10,9 +10,9 @@ vi.mock("../../src/env.js", () => ({
 const mockGetStore = vi.fn()
 
 vi.mock("../../src/registry.js", () => ({
-    StoreRegistry: vi.fn().mockImplementation(() => ({
-        getStore: mockGetStore,
-    })),
+    StoreRegistry: vi.fn(function () {
+        return { getStore: mockGetStore }
+    }),
 }))
 
 const mockOctokitInstance = {
@@ -27,7 +27,12 @@ const mockOctokitInstance = {
 
 vi.mock("probot", async () => {
     const actual = await vi.importActual<typeof import("probot")>("probot")
-    return { ...actual, ProbotOctokit: vi.fn(() => mockOctokitInstance) }
+    return {
+        ...actual,
+        ProbotOctokit: vi.fn(function () {
+            return mockOctokitInstance
+        }),
+    }
 })
 
 vi.mock("../../src/dependencies.js", async () => {
@@ -532,9 +537,9 @@ describe("commander wiring", () => {
         consoleSpy = vi
             .spyOn(console, "log")
             .mockImplementation(() => undefined)
-        vi.mocked(StoreRegistry).mockImplementation(() => ({
-            getStore: mockGetStore,
-        }))
+        vi.mocked(StoreRegistry).mockImplementation(function () {
+            return { getStore: mockGetStore }
+        })
         mockGetStore.mockResolvedValue(makeStore())
     })
 
