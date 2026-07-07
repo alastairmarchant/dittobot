@@ -81,7 +81,6 @@ describe("StoreRegistry — memory store", () => {
         expect(config.enrolledRepos).toEqual([])
         expect(config.mergeStrategy).toBe("squash")
         expect(config.requireCi).toBe(true)
-        expect(config.org).toBe("acme")
     })
 })
 
@@ -107,10 +106,8 @@ describe("StoreRegistry — local store", () => {
         const configPath = path.join(tmpDir, "acme-corp", "config.json")
         const raw = await readFile(configPath, "utf8")
         const config = JSON.parse(raw) as {
-            org: string
             enrolledRepos: string[]
         }
-        expect(config.org).toBe("acme-corp")
         expect(config.enrolledRepos).toEqual([])
     })
 
@@ -146,7 +143,6 @@ describe("StoreRegistry — local store", () => {
         // Manually modify the config
         const configPath = path.join(tmpDir, "acme", "config.json")
         const modified = {
-            org: "acme",
             enrolledRepos: ["repo-a"],
             mergeStrategy: "squash",
             requireCi: true,
@@ -172,7 +168,6 @@ describe("StoreRegistry — github store", () => {
         const registry = new StoreRegistry(makeGithubConfig())
         const octokit = makeMockOctokit()
         const configData = {
-            org: "acme",
             enrolledRepos: [],
             mergeStrategy: "squash",
             requireCi: true,
@@ -210,7 +205,7 @@ describe("StoreRegistry — github store", () => {
             octokit.rest.repos.createOrUpdateFileContents,
         ).toHaveBeenCalledTimes(3)
 
-        // Verify config.json was pushed with correct org
+        // Verify config.json was pushed with default config
         const calls = octokit.rest.repos.createOrUpdateFileContents.mock.calls
         const configCall = calls.find(
             (c) => (c[0] as { path: string }).path === "config.json",
@@ -221,8 +216,8 @@ describe("StoreRegistry — github store", () => {
                 (configCall![0] as { content: string }).content,
                 "base64",
             ).toString("utf-8"),
-        ) as { org: string }
-        expect(content.org).toBe("acme")
+        ) as { enrolledRepos: string[] }
+        expect(content.enrolledRepos).toEqual([])
     })
 
     test("repo exists but config.json absent: createInOrg 422 → push initial files without creating repo", async () => {
@@ -278,7 +273,6 @@ describe("StoreRegistry — github store", () => {
         const registry = new StoreRegistry(makeGithubConfig())
         const octokit = makeMockOctokit()
         const configData = {
-            org: "acme",
             enrolledRepos: [],
             mergeStrategy: "squash",
             requireCi: true,

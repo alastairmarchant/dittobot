@@ -61,7 +61,6 @@ type AuditFileData = {
 }
 
 export type StoreConfig = {
-    org: string
     enrolledRepos: string[]
     mergeStrategy: "squash" | "merge" | "rebase"
     requireCi: boolean
@@ -524,9 +523,8 @@ class ApprovalStore {
     }
 }
 
-export function createDefaultStoreConfig(org: string): StoreConfig {
+export function createDefaultStoreConfig(): StoreConfig {
     return {
-        org,
         enrolledRepos: [],
         mergeStrategy: "squash",
         requireCi: true,

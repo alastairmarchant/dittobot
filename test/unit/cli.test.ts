@@ -60,7 +60,6 @@ import type { Dependency } from "../../src/dependencies.js"
 
 const makeStore = (enrolledRepos: string[] = []) => {
     const provider = new MemoryVersionStoreProvider({
-        org: "test-org",
         enrolledRepos,
         mergeStrategy: "squash",
         requireCi: true,
@@ -246,7 +245,7 @@ describe("scanAction", () => {
     test("calls checkPendingPrs with dryRun=false when passed false", async () => {
         const store = makeStore()
 
-        await scanAction(store, mockOctokit, false)
+        await scanAction(store, mockOctokit, "test-org", false)
 
         expect(checkPendingPrs).toHaveBeenCalledOnce()
         expect(checkPendingPrs).toHaveBeenCalledWith(
@@ -260,7 +259,7 @@ describe("scanAction", () => {
     test("calls checkPendingPrs with dryRun=true when passed true", async () => {
         const store = makeStore()
 
-        await scanAction(store, mockOctokit, true)
+        await scanAction(store, mockOctokit, "test-org", true)
 
         expect(checkPendingPrs).toHaveBeenCalledOnce()
         expect(checkPendingPrs).toHaveBeenCalledWith(
@@ -271,10 +270,10 @@ describe("scanAction", () => {
         )
     })
 
-    test("passes the org from store config to checkPendingPrs", async () => {
+    test("passes the given org to checkPendingPrs", async () => {
         const store = makeStore()
 
-        await scanAction(store, mockOctokit, false)
+        await scanAction(store, mockOctokit, "test-org", false)
 
         expect(checkPendingPrs).toHaveBeenCalledWith(
             mockOctokit,
@@ -302,7 +301,7 @@ describe("pendingAction", () => {
         consoleSpy.mockRestore()
     })
 
-    test("calls store.getConfig to get owner", async () => {
+    test("calls store.getConfig to get enrolled repos", async () => {
         const store = makeStore(["my-org/repo-a"])
         const configSpy = vi.spyOn(store, "getConfig")
 
@@ -311,7 +310,7 @@ describe("pendingAction", () => {
             paginate: vi.fn().mockResolvedValue([]),
         } as never
 
-        await pendingAction(store, mockOctokit)
+        await pendingAction(store, mockOctokit, "test-org")
 
         expect(configSpy).toHaveBeenCalled()
     })
@@ -324,7 +323,7 @@ describe("pendingAction", () => {
             paginate: vi.fn().mockResolvedValue([]),
         } as never
 
-        await pendingAction(store, mockOctokit)
+        await pendingAction(store, mockOctokit, "test-org")
 
         expect(
             (mockOctokit as { paginate: ReturnType<typeof vi.fn> }).paginate,
@@ -339,7 +338,7 @@ describe("pendingAction", () => {
             paginate: vi.fn().mockResolvedValue([]),
         } as never
 
-        await pendingAction(store, mockOctokit)
+        await pendingAction(store, mockOctokit, "test-org")
 
         expect(
             (mockOctokit as { paginate: ReturnType<typeof vi.fn> }).paginate,
@@ -358,7 +357,6 @@ updated-dependencies:
 `
         // Store has ruff approved — PR will be READY
         const provider = new MemoryVersionStoreProvider({
-            org: "test-org",
             enrolledRepos: ["my-org/repo-a"],
             mergeStrategy: "squash",
             requireCi: true,
@@ -401,7 +399,7 @@ updated-dependencies:
             .spyOn(console, "log")
             .mockImplementation(() => undefined)
 
-        await pendingAction(store, mockOctokit)
+        await pendingAction(store, mockOctokit, "test-org")
 
         const output = consoleSpy.mock.calls
             .map((c) => c[0] as string)
@@ -466,7 +464,7 @@ updated-dependencies:
         mockOctokit.rest.pulls.listCommits.mockResolvedValueOnce({ data: [] }) // PR #2 — no commits → no deps
         const store2 = makeStore(["my-org/repo-a"])
 
-        await pendingAction(store2, mockOctokit as never)
+        await pendingAction(store2, mockOctokit as never, "test-org")
 
         consoleSpy.mockRestore()
     })
@@ -512,7 +510,7 @@ updated-dependencies:
             ]),
         } as never
 
-        await pendingAction(store, mockOctokit)
+        await pendingAction(store, mockOctokit, "test-org")
 
         const output = consoleSpy.mock.calls
             .map((c) => c[0] as string)

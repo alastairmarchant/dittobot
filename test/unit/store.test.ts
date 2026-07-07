@@ -37,7 +37,6 @@ const makeAuditEvent = (action = "test-action"): AuditEvent => ({
 })
 
 const makeStoreConfig = (): StoreConfig => ({
-    org: "test-org",
     enrolledRepos: [],
     mergeStrategy: "squash",
     requireCi: true,
@@ -97,19 +96,13 @@ describe("ensurePackageInVersions", () => {
 // ---------------------------------------------------------------------------
 
 describe("createDefaultStoreConfig", () => {
-    test("returns StoreConfig with correct defaults for given org", () => {
-        const config = createDefaultStoreConfig("acme-org")
+    test("returns StoreConfig with correct defaults", () => {
+        const config = createDefaultStoreConfig()
         expect(config).toEqual({
-            org: "acme-org",
             enrolledRepos: [],
             mergeStrategy: "squash",
             requireCi: true,
         })
-    })
-
-    test("org field matches the provided org name", () => {
-        const config = createDefaultStoreConfig("my-corp")
-        expect(config.org).toBe("my-corp")
     })
 })
 
@@ -127,7 +120,6 @@ describe("MemoryVersionStoreProvider", () => {
     test("getConfig returns StoreConfig built from constructor args", async () => {
         const config = await provider.getConfig()
         expect(config).toEqual({
-            org: "test-org",
             enrolledRepos: [],
             mergeStrategy: "squash",
             requireCi: true,
@@ -181,16 +173,15 @@ describe("MemoryVersionStoreProvider", () => {
     })
 
     test("updateConfig persists change and returns updated config", async () => {
-        const updated = await provider.updateConfig("org", "new-org")
-        expect(updated.org).toBe("new-org")
+        const updated = await provider.updateConfig("mergeStrategy", "merge")
+        expect(updated.mergeStrategy).toBe("merge")
         const config = await provider.getConfig()
-        expect(config.org).toBe("new-org")
+        expect(config.mergeStrategy).toBe("merge")
     })
 
     test("constructor deep-copies enrolledRepos so external mutation does not affect the provider", async () => {
         const repos = ["repo-a"]
         const storeProvider = new MemoryVersionStoreProvider({
-            org: "test-org",
             enrolledRepos: repos,
             mergeStrategy: "squash",
             requireCi: true,
@@ -293,18 +284,17 @@ describe("LocalFileStoreProvider", () => {
         await writeFile(
             path.join(tmpDir, "config.json"),
             JSON.stringify({
-                org: "acme",
                 enrolledRepos: [],
                 mergeStrategy: "squash",
                 requireCi: true,
             }),
         )
 
-        const updated = await provider.updateConfig("org", "new-acme")
-        expect(updated.org).toBe("new-acme")
+        const updated = await provider.updateConfig("mergeStrategy", "merge")
+        expect(updated.mergeStrategy).toBe("merge")
 
         const config = await provider.getConfig()
-        expect(config.org).toBe("new-acme")
+        expect(config.mergeStrategy).toBe("merge")
     })
 
     test("approvalStoreLink returns file:// URL pointing to approved-versions.json", () => {
@@ -319,7 +309,6 @@ describe("LocalFileStoreProvider", () => {
 // ---------------------------------------------------------------------------
 
 const validStoreConfig: StoreConfig = {
-    org: "acme",
     enrolledRepos: ["acme/repo-a"],
     mergeStrategy: "squash",
     requireCi: true,

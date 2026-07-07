@@ -384,7 +384,6 @@ describe("buildApprovalComment", () => {
 // ---------------------------------------------------------------------------
 
 const memConfig = (requireCi: boolean) => ({
-    org: "org",
     enrolledRepos: ["org/my-repo"],
     mergeStrategy: "squash" as const,
     requireCi,

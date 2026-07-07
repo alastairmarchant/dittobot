@@ -52,6 +52,7 @@ export async function listAction(store: ApprovalStore): Promise<void> {
 export async function pendingAction(
     store: ApprovalStore,
     octokit: ProbotOctokit,
+    owner: string,
 ): Promise<void> {
     const approvedVersions = await store.getApprovedVersions()
 
@@ -59,7 +60,6 @@ export async function pendingAction(
     let totalApproved = 0
 
     const config = await store.getConfig()
-    const owner = config.org
     for (const repo of config.enrolledRepos) {
         const prs = await octokit.paginate(octokit.rest.pulls.list, {
             owner: owner,
@@ -113,10 +113,10 @@ export async function pendingAction(
 export async function scanAction(
     store: ApprovalStore,
     octokit: ProbotOctokit,
+    org: string,
     dryRun: boolean,
 ): Promise<void> {
-    const config = await store.getConfig()
-    await checkPendingPrs(octokit, config.org, store, dryRun)
+    await checkPendingPrs(octokit, org, store, dryRun)
 }
 
 export async function enrollAction(
@@ -151,13 +151,18 @@ export async function unenrollAction(
     console.log(`Unenrolled ${repo}.`)
 }
 
-const getStoreForOrg = async (
-    octokit: ProbotOctokit,
-): Promise<ApprovalStore> => {
+const getOrg = (): string => {
     const org = (program.opts() as { org?: string }).org
     if (!org) {
         throw new Error("--org option is required")
     }
+    return org
+}
+
+const getStoreForOrg = async (
+    octokit: ProbotOctokit,
+    org: string,
+): Promise<ApprovalStore> => {
     const registry = new StoreRegistry(env)
     return registry.getStore(org, octokit)
 }
@@ -196,7 +201,7 @@ program
                     token: process.env.GITHUB_PAT_TOKEN,
                 },
             })
-            const store = await getStoreForOrg(octokit)
+            const store = await getStoreForOrg(octokit, getOrg())
 
             const dep: Dependency = {
                 name: dependency,
@@ -218,7 +223,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const store = await getStoreForOrg(octokit)
+        const store = await getStoreForOrg(octokit, getOrg())
         await listAction(store)
     })
 
@@ -231,8 +236,9 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const store = await getStoreForOrg(octokit)
-        await pendingAction(store, octokit)
+        const org = getOrg()
+        const store = await getStoreForOrg(octokit, org)
+        await pendingAction(store, octokit, org)
     })
 
 program
@@ -245,8 +251,9 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const store = await getStoreForOrg(octokit)
-        await scanAction(store, octokit, options.dryRun ?? false)
+        const org = getOrg()
+        const store = await getStoreForOrg(octokit, org)
+        await scanAction(store, octokit, org, options.dryRun ?? false)
     })
 
 program
@@ -259,7 +266,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const store = await getStoreForOrg(octokit)
+        const store = await getStoreForOrg(octokit, getOrg())
         await enrollAction(store, repository)
     })
 
@@ -273,7 +280,7 @@ program
                 token: process.env.GITHUB_PAT_TOKEN,
             },
         })
-        const store = await getStoreForOrg(octokit)
+        const store = await getStoreForOrg(octokit, getOrg())
         await unenrollAction(store, repository)
     })
 

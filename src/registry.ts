@@ -74,7 +74,7 @@ export class StoreRegistry {
                 } catch {
                     await fs.writeFile(
                         configPath,
-                        JSON.stringify(createDefaultStoreConfig(org), null, 4),
+                        JSON.stringify(createDefaultStoreConfig(), null, 4),
                         "utf8",
                     )
                 }
@@ -82,9 +82,7 @@ export class StoreRegistry {
             }
             case "memory": {
                 return new ApprovalStore(
-                    new MemoryVersionStoreProvider(
-                        createDefaultStoreConfig(org),
-                    ),
+                    new MemoryVersionStoreProvider(createDefaultStoreConfig()),
                 )
             }
             default:
@@ -136,7 +134,7 @@ export class StoreRegistry {
             }
         }
 
-        const defaultConfig = createDefaultStoreConfig(org)
+        const defaultConfig = createDefaultStoreConfig()
         const now = new Date().toISOString()
         const filesToPush = [
             {

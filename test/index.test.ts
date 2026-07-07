@@ -98,7 +98,6 @@ describe("DittoBot app", () => {
 
         // Create a fresh store for each test
         mockStoreProvider = new MemoryVersionStoreProvider({
-            org: "octocat",
             enrolledRepos: ["Team Environment", "Another-Repo"],
             mergeStrategy: "squash",
             requireCi: false,
