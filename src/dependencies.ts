@@ -152,7 +152,7 @@ export const buildApprovalComment = (
 ): string => {
     const lines = [
         "## :robot: Auto-approved by DittoBot\n",
-        "All dependency versions in this PR were previously reviewed and approved:\n",
+        "All dependency versions in this PR were reviewed and approved:\n",
     ]
     for (const dep of approvedDeps) {
         let line = `- \`${dep.name}\` -> \`${dep.version}\` (${dep.ecosystem})`
