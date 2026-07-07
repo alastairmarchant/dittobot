@@ -30,7 +30,7 @@ const makeLocalConfig = (basePath: string): DittoBotConfig => ({
 })
 
 const makeGithubConfig = (defaultRepo = ".dittobot-store"): DittoBotConfig => ({
-    STORE: { TYPE: "github", DEFAULT_REPO: defaultRepo },
+    STORE: { TYPE: "github", REPO: defaultRepo },
     STRICT_VERSIONS: true,
 })
 

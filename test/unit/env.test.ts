@@ -73,13 +73,13 @@ describe("parseEnv", () => {
 
     test("valid github store config", () => {
         vi.stubEnv("DITTOBOT_STORE__TYPE", "github")
-        vi.stubEnv("DITTOBOT_STORE__DEFAULT_REPO", ".dittobot-store")
+        vi.stubEnv("DITTOBOT_STORE__REPO", ".dittobot-store")
 
         const result = parseEnv()
 
         expect(result.STORE).toEqual({
             TYPE: "github",
-            DEFAULT_REPO: ".dittobot-store",
+            REPO: ".dittobot-store",
         })
     })
 
@@ -101,7 +101,7 @@ describe("parseEnv", () => {
         expect(result.STRICT_VERSIONS).toBe(true)
     })
 
-    test("github store missing DEFAULT_REPO → ZodError", () => {
+    test("github store missing REPO → ZodError", () => {
         vi.stubEnv("DITTOBOT_STORE__TYPE", "github")
 
         expect(() => parseEnv()).toThrow(ZodError)

@@ -59,10 +59,10 @@ export class StoreRegistry {
 
         switch (storeConfig.TYPE) {
             case "github": {
-                const { DEFAULT_REPO } = storeConfig
-                await this._bootstrapGithub(octokit, org, DEFAULT_REPO)
+                const { REPO } = storeConfig
+                await this._bootstrapGithub(octokit, org, REPO)
                 return new ApprovalStore(
-                    new GithubVersionStoreProvider(octokit, org, DEFAULT_REPO),
+                    new GithubVersionStoreProvider(octokit, org, REPO),
                 )
             }
             case "local": {

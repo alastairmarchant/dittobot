@@ -2,7 +2,7 @@ import { z } from "zod"
 
 const GithubStoreConfigSchema = z.object({
     TYPE: z.literal("github"),
-    DEFAULT_REPO: z.string(),
+    REPO: z.string(),
 })
 
 export type GithubStoreConfig = z.infer<typeof GithubStoreConfigSchema>

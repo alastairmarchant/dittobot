@@ -32,7 +32,7 @@ docker run \
   -e PRIVATE_KEY=<pem-value> \
   -e WEBHOOK_SECRET=<secret> \
   -e DITTOBOT_STORE__TYPE=github \
-  -e DITTOBOT_STORE__DEFAULT_REPO=<owner/repo> \
+  -e DITTOBOT_STORE__REPO=.dittobot \
   dittobot
 ```
 
