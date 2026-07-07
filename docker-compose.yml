@@ -6,11 +6,13 @@ services:
         user: "1000:1000"
         restart: unless-stopped
         ports:
-            - "3000:3000"
+            - "3030:3000"
         env_file:
             - .env
         volumes:
-            - ./data:/app/data
+            # local provider only
+            # - ./data:/app/data
+            - ./private-key.pem:/app/private-key.pem:ro
         tmpfs:
             - /tmp
         read_only: true
