@@ -5,7 +5,7 @@ import {
     compare,
     compareVersions,
 } from "compare-versions"
-import type { ApprovedVersions } from "./store.js"
+import type { ApprovedVersions, ApprovedVersionMetadata } from "./store.js"
 import ApprovalStore from "./store.js"
 import type { components as RestComponents } from "@octokit/openapi-types"
 import type { components as WebhookComponents } from "@octokit/openapi-webhooks-types"
@@ -104,22 +104,22 @@ export const extractPrDependencies = async (
     return dependencies
 }
 
-export const versionIsApproved = (
+export const getApprovalMetadata = (
     approvedVersions: ApprovedVersions,
     dep: Dependency,
-): boolean => {
+): ApprovedVersionMetadata | undefined => {
     const packageVersions = approvedVersions[dep.ecosystem]?.[dep.name]
 
     if (!packageVersions) {
-        return false
+        return undefined
     }
 
     if (packageVersions[dep.version]) {
-        return true
+        return packageVersions[dep.version]
     }
 
     if (!validateVersion(dep.version)) {
-        return false
+        return undefined
     }
 
     const maxApprovedVersion = Object.keys(packageVersions)
@@ -128,26 +128,45 @@ export const versionIsApproved = (
         .pop()
 
     if (!maxApprovedVersion) {
-        return false
+        return undefined
     }
 
-    return compare(maxApprovedVersion, dep.version, ">=")
+    if (compare(maxApprovedVersion, dep.version, ">=")) {
+        return packageVersions[maxApprovedVersion]
+    }
+
+    return undefined
 }
 
-const buildApprovalComment = (approvedDeps: Dependency[]): string => {
-    // TODO: Link to approval store
-    const approval_store_link = ""
+export const versionIsApproved = (
+    approvedVersions: ApprovedVersions,
+    dep: Dependency,
+): boolean => {
+    return getApprovalMetadata(approvedVersions, dep) !== undefined
+}
+
+export const buildApprovalComment = (
+    approvedDeps: Dependency[],
+    approvedVersions: ApprovedVersions,
+    approvalStoreLink: string,
+): string => {
     const lines = [
         "## :robot: Auto-approved by DittoBot\n",
-        "All dependency versions in this PR have been previously reviewed and approved:\n",
+        "All dependency versions in this PR were previously reviewed and approved:\n",
     ]
     for (const dep of approvedDeps) {
-        lines.push(`- \`${dep.name}\` -> \`${dep.version}\` (${dep.ecosystem})`)
+        let line = `- \`${dep.name}\` -> \`${dep.version}\` (${dep.ecosystem})`
+        const metadata = getApprovalMetadata(approvedVersions, dep)
+        if (metadata) {
+            line += ` — approved in [${metadata.sourceRepo}#${metadata.sourcePr}](https://github.com/${metadata.sourceRepo}/pull/${metadata.sourcePr})`
+        }
+        lines.push(line)
     }
 
-    lines.push(
-        `\n---\n_This PR was automatically approved because these versions were manually reviewed in another repository. See the [approval store](${approval_store_link}) for details._`,
-    )
+    const footer = approvalStoreLink
+        ? `\n---\n_Automatically approved by DittoBot based on prior manual reviews. See the [approval store](${approvalStoreLink}) for the full history._`
+        : `\n---\n_Automatically approved by DittoBot based on prior manual reviews._`
+    lines.push(footer)
 
     return lines.join("\n")
 }
@@ -158,8 +177,14 @@ const approveAndMergePr = async (
     repository: Repository,
     dependencies: Dependency[],
     mergeStrategy: "squash" | "merge" | "rebase",
+    approvedVersions: ApprovedVersions,
+    approvalStoreLink: string,
 ): Promise<boolean> => {
-    const comment = buildApprovalComment(dependencies)
+    const comment = buildApprovalComment(
+        dependencies,
+        approvedVersions,
+        approvalStoreLink,
+    )
 
     try {
         await octokit.rest.pulls.createReview({
@@ -330,6 +355,8 @@ export const checkPendingPrs = async (
                 repoData.data,
                 prDependencies,
                 mergeStrategy,
+                approvedVersions,
+                store.approvalStoreLink,
             )
 
             if (success) {
@@ -432,6 +459,8 @@ export const checkPr = async (
         repository,
         dependencies,
         config.mergeStrategy,
+        approvedVersions,
+        store.approvalStoreLink,
     )
 
     if (!success) {

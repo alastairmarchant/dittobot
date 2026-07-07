@@ -11,6 +11,7 @@ import {
     isDependabotPr,
     extractPrDependencies,
     versionIsApproved,
+    buildApprovalComment,
     checkPendingPrs,
     captureApproval,
     checkPr,
@@ -334,6 +335,47 @@ describe("versionIsApproved", () => {
         expect(versionIsApproved(versions, dep("ruff", "1.8.0", "uv"))).toBe(
             true,
         )
+    })
+})
+
+// ---------------------------------------------------------------------------
+// buildApprovalComment
+// ---------------------------------------------------------------------------
+
+describe("buildApprovalComment", () => {
+    test("links each dependency to its approving PR", () => {
+        const versions = makeVersions("uv", "ruff", ["0.15.11"])
+        const comment = buildApprovalComment(
+            [dep("ruff", "0.15.11", "uv")],
+            versions,
+            "",
+        )
+        expect(comment).toContain(
+            "- `ruff` -> `0.15.11` (uv) — approved in [org/repo#1](https://github.com/org/repo/pull/1)",
+        )
+    })
+
+    test("includes approval store link in footer when provided", () => {
+        const versions = makeVersions("uv", "ruff", ["0.15.11"])
+        const comment = buildApprovalComment(
+            [dep("ruff", "0.15.11", "uv")],
+            versions,
+            "https://github.com/org/store",
+        )
+        expect(comment).toContain(
+            "See the [approval store](https://github.com/org/store) for the full history._",
+        )
+    })
+
+    test("omits the store link and provenance when no metadata or link is available", () => {
+        const comment = buildApprovalComment(
+            [dep("ruff", "0.15.11", "uv")],
+            {},
+            "",
+        )
+        expect(comment).toContain("- `ruff` -> `0.15.11` (uv)")
+        expect(comment).not.toContain("approved in [")
+        expect(comment).not.toContain("approval store")
     })
 })
 

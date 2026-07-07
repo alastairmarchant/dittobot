@@ -207,12 +207,12 @@ describe("DittoBot app", () => {
                         expect(body).toMatchObject({
                             body: `## :robot: Auto-approved by DittoBot
 
-All dependency versions in this PR have been previously reviewed and approved:
+All dependency versions in this PR were previously reviewed and approved:
 
-- \`ruff\` -> \`0.15.11\` (uv)
+- \`ruff\` -> \`0.15.11\` (uv) — approved in [octocat/Hello-World#28](https://github.com/octocat/Hello-World/pull/28)
 
 ---
-_This PR was automatically approved because these versions were manually reviewed in another repository. See the [approval store]() for details._`,
+_Automatically approved by DittoBot based on prior manual reviews._`,
                             event: "APPROVE",
                         })
                         return true
@@ -481,12 +481,12 @@ _This PR was automatically approved because these versions were manually reviewe
                     expect(body).toMatchObject({
                         body: `## :robot: Auto-approved by DittoBot
 
-All dependency versions in this PR have been previously reviewed and approved:
+All dependency versions in this PR were previously reviewed and approved:
 
-- \`ruff\` -> \`0.15.11\` (uv)
+- \`ruff\` -> \`0.15.11\` (uv) — approved in [octocat/Hello-World#28](https://github.com/octocat/Hello-World/pull/28)
 
 ---
-_This PR was automatically approved because these versions were manually reviewed in another repository. See the [approval store]() for details._`,
+_Automatically approved by DittoBot based on prior manual reviews._`,
                         event: "APPROVE",
                     })
                     return true
