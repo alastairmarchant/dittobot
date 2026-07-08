@@ -616,6 +616,51 @@ describe("checkPendingPrs", () => {
         expect(octokit.rest.pulls.createReview).toHaveBeenCalledOnce()
         expect(octokit.rest.pulls.merge).toHaveBeenCalledOnce()
     })
+
+    test("requireCi=true: merges when all CI checks succeeded or were skipped", async () => {
+        const store = await makeStoreWithRuff(true)
+        const octokit = makePendingOctokit({
+            paginate: vi.fn().mockResolvedValue([makeDepbotPr()]),
+        })
+        octokit.rest.checks.listForRef.mockResolvedValue({
+            data: {
+                check_runs: [
+                    {
+                        app: { slug: "github-actions" },
+                        conclusion: "success",
+                    },
+                    {
+                        app: { slug: "github-actions" },
+                        conclusion: "skipped",
+                    },
+                ],
+            },
+        })
+
+        await checkPendingPrs(octokit as never, "org", store, false)
+
+        expect(octokit.rest.pulls.createReview).toHaveBeenCalledOnce()
+        expect(octokit.rest.pulls.merge).toHaveBeenCalledOnce()
+    })
+
+    test("logs error and continues when approve/merge fails", async () => {
+        const store = await makeStoreWithRuff(false)
+        const octokit = makePendingOctokit({
+            paginate: vi.fn().mockResolvedValue([makeDepbotPr()]),
+        })
+        octokit.rest.pulls.merge.mockRejectedValue(new Error("merge conflict"))
+        const consoleErrorSpy = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => undefined)
+
+        await checkPendingPrs(octokit as never, "org", store, false)
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Error approving/merging PR:",
+            expect.any(Error),
+        )
+        consoleErrorSpy.mockRestore()
+    })
 })
 
 // ---------------------------------------------------------------------------
