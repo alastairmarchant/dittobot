@@ -56,6 +56,7 @@ export class StoreRegistry {
         octokit: ProbotOctokit,
     ): Promise<ApprovalStore> {
         const storeConfig = this._config.STORE
+        const configTtlMs = this._config.CONFIG_TTL_SECONDS * 1000
 
         switch (storeConfig.TYPE) {
             case "github": {
@@ -63,6 +64,7 @@ export class StoreRegistry {
                 await this._bootstrapGithub(octokit, org, REPO)
                 return new ApprovalStore(
                     new GithubVersionStoreProvider(octokit, org, REPO),
+                    configTtlMs,
                 )
             }
             case "local": {
@@ -78,11 +80,15 @@ export class StoreRegistry {
                         "utf8",
                     )
                 }
-                return new ApprovalStore(new LocalFileStoreProvider(orgPath))
+                return new ApprovalStore(
+                    new LocalFileStoreProvider(orgPath),
+                    configTtlMs,
+                )
             }
             case "memory": {
                 return new ApprovalStore(
                     new MemoryVersionStoreProvider(createDefaultStoreConfig()),
+                    configTtlMs,
                 )
             }
             default:

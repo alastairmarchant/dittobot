@@ -4,6 +4,7 @@ vi.mock("../../src/env.js", () => ({
     env: {
         STORE: { TYPE: "memory" },
         STRICT_VERSIONS: true,
+        CONFIG_TTL_SECONDS: 60,
     },
 }))
 
@@ -691,7 +692,7 @@ describe("captureApproval", () => {
 
     test("returns early when repo is not enrolled", async () => {
         const store = new ApprovalStore(
-            new MemoryVersionStoreProvider(createDefaultStoreConfig("org")),
+            new MemoryVersionStoreProvider(createDefaultStoreConfig()),
         )
 
         await captureApproval(
@@ -711,7 +712,7 @@ describe("captureApproval", () => {
 
     test("returns early when no dependencies can be extracted (repo enrolled, empty commits)", async () => {
         const provider = new MemoryVersionStoreProvider({
-            ...createDefaultStoreConfig("org"),
+            ...createDefaultStoreConfig(),
             enrolledRepos: ["my-repo"],
         })
         const store = new ApprovalStore(provider)
@@ -755,7 +756,7 @@ describe("checkPr", () => {
     const makeStore = (enrolledRepos: string[] = []) =>
         new ApprovalStore(
             new MemoryVersionStoreProvider({
-                ...createDefaultStoreConfig("org"),
+                ...createDefaultStoreConfig(),
                 enrolledRepos,
             }),
         )

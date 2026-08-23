@@ -9,6 +9,7 @@ vi.mock("../../src/env.js", () => ({
             TYPE: "memory",
         },
         STRICT_VERSIONS: true,
+        CONFIG_TTL_SECONDS: 60,
     },
 }))
 
@@ -18,6 +19,7 @@ import ApprovalStore, {
     MemoryVersionStoreProvider,
     ensurePackageInVersions,
     createDefaultStoreConfig,
+    DEFAULT_CONFIG_TTL_MS,
 } from "../../src/store.js"
 import { ConfigError } from "../../src/errors.js"
 import type {
@@ -219,6 +221,44 @@ describe("LocalFileStoreProvider", () => {
         await expect(provider.getConfig()).rejects.toThrow(ConfigError)
     })
 
+    test("getConfig throws ConfigError when config.json is not valid JSON", async () => {
+        await writeFile(path.join(tmpDir, "config.json"), "{ not json", "utf8")
+
+        await expect(provider.getConfig()).rejects.toThrow(/is not valid JSON/)
+    })
+
+    test("getConfig throws ConfigError naming the invalid fields", async () => {
+        await writeFile(
+            path.join(tmpDir, "config.json"),
+            JSON.stringify({
+                enrolledRepos: "my-repo",
+                mergeStrategy: "fast-forward",
+            }),
+            "utf8",
+        )
+
+        await expect(provider.getConfig()).rejects.toThrow(ConfigError)
+        await expect(provider.getConfig()).rejects.toThrow(
+            /enrolledRepos.*mergeStrategy.*requireCi/s,
+        )
+    })
+
+    test("getConfig reports a root-level error when config.json is not an object", async () => {
+        await writeFile(path.join(tmpDir, "config.json"), "[]", "utf8")
+
+        await expect(provider.getConfig()).rejects.toThrow(/\(root\):/)
+    })
+
+    test("getConfig strips keys that are not part of StoreConfig", async () => {
+        await writeFile(
+            path.join(tmpDir, "config.json"),
+            JSON.stringify({ ...makeStoreConfig(), org: "left-over-key" }),
+            "utf8",
+        )
+
+        expect(await provider.getConfig()).toEqual(makeStoreConfig())
+    })
+
     test("getApprovedVersions returns empty {} when no approved-versions.json file", async () => {
         const versions = await provider.getApprovedVersions()
         expect(versions).toEqual({})
@@ -345,6 +385,14 @@ describe("GithubVersionStoreProvider", () => {
         expect(config).toEqual(validStoreConfig)
     })
 
+    test("getConfig throws ConfigError when the fetched config is invalid", async () => {
+        mockOctokit.rest.repos.getContent.mockResolvedValueOnce(
+            makeContentResponse({ enrolledRepos: ["a"], requireCi: "yes" }),
+        )
+
+        await expect(provider.getConfig()).rejects.toThrow(ConfigError)
+    })
+
     test("getConfig stores blob SHA in _configSha for subsequent updateConfig calls", async () => {
         mockOctokit.rest.repos.getContent.mockResolvedValueOnce(
             makeContentResponse(validStoreConfig, "sha-from-get"),
@@ -388,7 +436,7 @@ describe("GithubVersionStoreProvider", () => {
         )
 
         await expect(
-            provider.updateConfig("org", "broken-org"),
+            provider.updateConfig("mergeStrategy", "rebase"),
         ).rejects.toThrow("Failed to update config")
     })
 
@@ -498,7 +546,7 @@ describe("GithubVersionStoreProvider", () => {
                 data: { content: { sha: "configsha2" } },
             },
         )
-        await provider.updateConfig("org", "new-org")
+        await provider.updateConfig("mergeStrategy", "rebase")
 
         mockOctokit.rest.repos.getContent.mockResolvedValueOnce(
             makeContentResponse({ events: [] }, "auditsha1"),
@@ -617,13 +665,13 @@ describe("ApprovalStore", () => {
         const store = new ApprovalStore(provider)
 
         await store.getConfig()
-        const updated = await store.updateConfig("org", "updated-org")
+        const updated = await store.updateConfig("mergeStrategy", "rebase")
 
-        expect(updated.org).toBe("updated-org")
+        expect(updated.mergeStrategy).toBe("rebase")
         // Cache should now reflect the updated config — no additional provider call needed
         const spy = vi.spyOn(provider, "getConfig")
         const cached = await store.getConfig()
-        expect(cached.org).toBe("updated-org")
+        expect(cached.mergeStrategy).toBe("rebase")
         expect(spy).not.toHaveBeenCalled()
     })
 
@@ -728,5 +776,178 @@ describe("ApprovalStore", () => {
         const provider = makeProvider()
         const store = new ApprovalStore(provider)
         expect(store.approvalStoreLink).toBe(provider.approvalStoreLink)
+    })
+})
+
+// ---------------------------------------------------------------------------
+// 7. ApprovalStore config TTL
+// ---------------------------------------------------------------------------
+
+// A provider that hands out a fresh copy of its config each read, so the store's
+// cached value and the provider's "on disk" value can drift apart — exactly what
+// happens when someone edits config.json behind the bot's back.
+type FakeProvider = VersionStoreProvider & {
+    current: StoreConfig
+    failNextRead: boolean
+}
+
+const makeFakeProvider = (): FakeProvider => {
+    const provider: FakeProvider = {
+        current: makeStoreConfig(),
+        failNextRead: false,
+        approvalStoreLink: "fake://store",
+        getConfig: () => {
+            if (provider.failNextRead) {
+                return Promise.reject(new ConfigError("provider unavailable"))
+            }
+            return Promise.resolve({ ...provider.current })
+        },
+        updateConfig: (field, value) => {
+            const next = { ...provider.current }
+            next[field] = value
+            provider.current = next
+            return Promise.resolve({ ...next })
+        },
+        getApprovedVersions: () => Promise.resolve({}),
+        addApprovedVersion: () => Promise.resolve(true),
+        logEvent: () => Promise.resolve(),
+    }
+    return provider
+}
+
+describe("ApprovalStore config TTL", () => {
+    beforeEach(() => {
+        vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+        vi.restoreAllMocks()
+    })
+
+    test("serves the cached config while the TTL has not elapsed", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider)
+        const spy = vi.spyOn(provider, "getConfig")
+
+        await store.getConfig()
+        provider.current = { ...provider.current, requireCi: false }
+        vi.advanceTimersByTime(DEFAULT_CONFIG_TTL_MS - 1)
+
+        expect((await store.getConfig()).requireCi).toBe(true)
+        expect(spy).toHaveBeenCalledOnce()
+    })
+
+    test("picks up an external config edit once the TTL elapses", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider)
+        const spy = vi.spyOn(provider, "getConfig")
+
+        expect((await store.getConfig()).enrolledRepos).toEqual([])
+
+        // Someone edits config.json directly — the bot knows nothing about it.
+        provider.current = { ...provider.current, enrolledRepos: ["new-repo"] }
+        vi.advanceTimersByTime(DEFAULT_CONFIG_TTL_MS)
+
+        expect((await store.getConfig()).enrolledRepos).toEqual(["new-repo"])
+        expect(spy).toHaveBeenCalledTimes(2)
+    })
+
+    test("honours an explicit TTL passed to the constructor", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider, 5_000)
+
+        await store.getConfig()
+        const spy = vi.spyOn(provider, "getConfig")
+
+        vi.advanceTimersByTime(4_999)
+        await store.getConfig()
+        expect(spy).not.toHaveBeenCalled()
+
+        vi.advanceTimersByTime(1)
+        await store.getConfig()
+        expect(spy).toHaveBeenCalledOnce()
+    })
+
+    test("a TTL of 0 re-reads the config on every access", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider, 0)
+        const spy = vi.spyOn(provider, "getConfig")
+
+        await store.getConfig()
+        await store.getConfig()
+        await store.getConfig()
+
+        expect(spy).toHaveBeenCalledTimes(3)
+    })
+
+    test("updateConfig restarts the TTL window", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider)
+
+        await store.getConfig()
+        vi.advanceTimersByTime(DEFAULT_CONFIG_TTL_MS - 1)
+
+        await store.updateConfig("mergeStrategy", "rebase")
+        const spy = vi.spyOn(provider, "getConfig")
+
+        // Without the write resetting the clock, this read would look stale.
+        vi.advanceTimersByTime(2)
+        expect((await store.getConfig()).mergeStrategy).toBe("rebase")
+        expect(spy).not.toHaveBeenCalled()
+    })
+
+    test("serves the last good config and warns when a refresh fails", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider)
+        const warn = vi
+            .spyOn(console, "warn")
+            .mockImplementation(() => undefined)
+
+        await store.getConfig()
+
+        provider.failNextRead = true
+        vi.advanceTimersByTime(DEFAULT_CONFIG_TTL_MS)
+
+        expect((await store.getConfig()).mergeStrategy).toBe("squash")
+        expect(warn).toHaveBeenCalledOnce()
+        expect(warn.mock.calls[0]?.[0]).toContain("provider unavailable")
+    })
+
+    test("a failed refresh restarts the TTL window rather than retrying every read", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider)
+        vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+        await store.getConfig()
+
+        provider.failNextRead = true
+        vi.advanceTimersByTime(DEFAULT_CONFIG_TTL_MS)
+        await store.getConfig()
+
+        const spy = vi.spyOn(provider, "getConfig")
+        await store.getConfig()
+
+        expect(spy).not.toHaveBeenCalled()
+    })
+
+    test("throws when the very first read fails and there is nothing cached", async () => {
+        const provider = makeFakeProvider()
+        provider.failNextRead = true
+        const store = new ApprovalStore(provider)
+
+        await expect(store.getConfig()).rejects.toThrow(ConfigError)
+    })
+
+    test("invalidateCache forces a re-read inside the TTL window", async () => {
+        const provider = makeFakeProvider()
+        const store = new ApprovalStore(provider)
+        const spy = vi.spyOn(provider, "getConfig")
+
+        await store.getConfig()
+        store.invalidateCache()
+        await store.getConfig()
+
+        expect(spy).toHaveBeenCalledTimes(2)
     })
 })

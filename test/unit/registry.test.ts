@@ -7,6 +7,7 @@ vi.mock("../../src/env.js", () => ({
     env: {
         STORE: { TYPE: "memory" },
         STRICT_VERSIONS: true,
+        CONFIG_TTL_SECONDS: 60,
     },
 }))
 
@@ -22,16 +23,19 @@ import type { DittoBotConfig } from "../../src/env.js"
 const makeMemoryConfig = (): DittoBotConfig => ({
     STORE: { TYPE: "memory" },
     STRICT_VERSIONS: true,
+    CONFIG_TTL_SECONDS: 60,
 })
 
 const makeLocalConfig = (basePath: string): DittoBotConfig => ({
     STORE: { TYPE: "local", PATH: basePath },
     STRICT_VERSIONS: true,
+    CONFIG_TTL_SECONDS: 60,
 })
 
 const makeGithubConfig = (defaultRepo = ".dittobot-store"): DittoBotConfig => ({
     STORE: { TYPE: "github", REPO: defaultRepo },
     STRICT_VERSIONS: true,
+    CONFIG_TTL_SECONDS: 60,
 })
 
 const makeMockOctokit = () => ({

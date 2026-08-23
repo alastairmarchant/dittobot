@@ -2,6 +2,7 @@ import type { Dependency } from "./dependencies.js"
 import type { ProbotOctokit } from "probot"
 import { promises as fs } from "node:fs"
 import path from "node:path"
+import { z } from "zod"
 import { ConfigError } from "./errors.js"
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
@@ -60,10 +61,33 @@ type AuditFileData = {
     events: AuditEvent[]
 }
 
-export type StoreConfig = {
-    enrolledRepos: string[]
-    mergeStrategy: "squash" | "merge" | "rebase"
-    requireCi: boolean
+/** How long ApprovalStore serves a cached config.json before re-reading it. */
+export const DEFAULT_CONFIG_TTL_MS = 60_000
+
+export const StoreConfigSchema = z.object({
+    enrolledRepos: z.array(z.string()),
+    mergeStrategy: z.enum(["squash", "merge", "rebase"]),
+    requireCi: z.boolean(),
+})
+
+export type StoreConfig = z.infer<typeof StoreConfigSchema>
+
+/**
+ * Validate a config.json payload. `source` identifies the file in the error so a
+ * bad hand-edit points at the config that caused it.
+ */
+export const parseStoreConfig = (raw: unknown, source: string): StoreConfig => {
+    const result = StoreConfigSchema.safeParse(raw)
+    if (!result.success) {
+        const issues = result.error.issues
+            .map(
+                (issue) =>
+                    `${issue.path.join(".") || "(root)"}: ${issue.message}`,
+            )
+            .join("; ")
+        throw new ConfigError(`Invalid config at ${source}: ${issues}`)
+    }
+    return result.data
 }
 
 export type VersionStoreProvider = {
@@ -112,16 +136,25 @@ export class LocalFileStoreProvider implements VersionStoreProvider {
     }
 
     async getConfig(): Promise<StoreConfig> {
-        const config = await this._readJson<StoreConfig | null>(
-            this._configFile,
-            null,
-        )
-        if (!config) {
+        let raw: string
+        try {
+            raw = await fs.readFile(this._configFile, "utf8")
+        } catch {
             throw new ConfigError(
                 `Config file not found at ${this._configFile}`,
             )
         }
-        return config
+
+        let parsed: unknown
+        try {
+            parsed = JSON.parse(raw)
+        } catch (err: unknown) {
+            throw new ConfigError(
+                `Config file at ${this._configFile} is not valid JSON: ${String(err)}`,
+            )
+        }
+
+        return parseStoreConfig(parsed, this._configFile)
     }
 
     async updateConfig<K extends keyof StoreConfig>(
@@ -241,7 +274,10 @@ export class GithubVersionStoreProvider implements VersionStoreProvider {
     async getConfig(): Promise<StoreConfig> {
         const { data, sha } = await this._fetchJsonFile(this._configFile)
         this._configSha = sha
-        return data as unknown as StoreConfig
+        return parseStoreConfig(
+            data,
+            `${this._owner}/${this._repo}/${this._configFile}`,
+        )
     }
 
     async updateConfig<K extends keyof StoreConfig>(
@@ -453,17 +489,42 @@ export class MemoryVersionStoreProvider implements VersionStoreProvider {
 
 class ApprovalStore {
     private _configCache: StoreConfig | null = null
+    private _configCachedAt = 0
     private _versionsCache: ApprovedVersions | null = null
 
-    constructor(private _provider: VersionStoreProvider) {}
+    constructor(
+        private _provider: VersionStoreProvider,
+        private readonly _configTtlMs: number = DEFAULT_CONFIG_TTL_MS,
+    ) {}
 
     get approvalStoreLink(): string {
         return this._provider.approvalStoreLink
     }
 
     async getConfig(): Promise<StoreConfig> {
-        this._configCache ??= await this._provider.getConfig()
-        return this._configCache
+        const cached = this._configCache
+        if (cached && Date.now() - this._configCachedAt < this._configTtlMs) {
+            return cached
+        }
+
+        let config: StoreConfig
+        try {
+            config = await this._provider.getConfig()
+        } catch (err: unknown) {
+            if (!cached) {
+                throw err
+            }
+            // Transient provider failure (GitHub blip, mid-write local file):
+            // keep serving the last good config rather than failing the caller.
+            console.warn(
+                `Failed to refresh config, serving cached copy: ${String(err)}`,
+            )
+            config = cached
+        }
+
+        this._configCache = config
+        this._configCachedAt = Date.now()
+        return config
     }
 
     async updateConfig<K extends keyof StoreConfig>(
@@ -472,11 +533,13 @@ class ApprovalStore {
     ): Promise<StoreConfig> {
         const updatedConfig = await this._provider.updateConfig(field, value)
         this._configCache = updatedConfig
+        this._configCachedAt = Date.now()
         return updatedConfig
     }
 
     invalidateCache(): void {
         this._configCache = null
+        this._configCachedAt = 0
         this._versionsCache = null
     }
 

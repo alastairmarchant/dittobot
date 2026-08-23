@@ -4,6 +4,7 @@ vi.mock("../../src/env.js", () => ({
     env: {
         STORE: { TYPE: "memory" },
         STRICT_VERSIONS: true,
+        CONFIG_TTL_SECONDS: 60,
     },
 }))
 

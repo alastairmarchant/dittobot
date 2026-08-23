@@ -30,6 +30,7 @@ export type StoreProviderConfig = z.infer<typeof StoreConfigSchema>
 
 const EnvSchema = z.object({
     STRICT_VERSIONS: z.stringbool().default(true),
+    CONFIG_TTL_SECONDS: z.coerce.number().int().min(0).default(60),
     STORE: StoreConfigSchema,
 })
 

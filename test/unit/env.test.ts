@@ -53,6 +53,7 @@ describe("parseEnv", () => {
 
         expect(result).toEqual({
             STRICT_VERSIONS: true,
+            CONFIG_TTL_SECONDS: 60,
             STORE: {
                 TYPE: "memory",
             },
@@ -109,6 +110,41 @@ describe("parseEnv", () => {
 
     test("invalid STORE__TYPE=unknown → throws ZodError", () => {
         vi.stubEnv("DITTOBOT_STORE__TYPE", "unknown")
+
+        expect(() => parseEnv()).toThrow(ZodError)
+    })
+
+    test("CONFIG_TTL_SECONDS unset → defaults to 60", () => {
+        vi.stubEnv("DITTOBOT_CONFIG_TTL_SECONDS", undefined)
+        vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
+
+        expect(parseEnv().CONFIG_TTL_SECONDS).toBe(60)
+    })
+
+    test("CONFIG_TTL_SECONDS is coerced from its string value", () => {
+        vi.stubEnv("DITTOBOT_CONFIG_TTL_SECONDS", "5")
+        vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
+
+        expect(parseEnv().CONFIG_TTL_SECONDS).toBe(5)
+    })
+
+    test("CONFIG_TTL_SECONDS=0 is allowed (caching disabled)", () => {
+        vi.stubEnv("DITTOBOT_CONFIG_TTL_SECONDS", "0")
+        vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
+
+        expect(parseEnv().CONFIG_TTL_SECONDS).toBe(0)
+    })
+
+    test("non-numeric CONFIG_TTL_SECONDS → throws ZodError", () => {
+        vi.stubEnv("DITTOBOT_CONFIG_TTL_SECONDS", "soon")
+        vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
+
+        expect(() => parseEnv()).toThrow(ZodError)
+    })
+
+    test("negative CONFIG_TTL_SECONDS → throws ZodError", () => {
+        vi.stubEnv("DITTOBOT_CONFIG_TTL_SECONDS", "-1")
+        vi.stubEnv("DITTOBOT_STORE__TYPE", "memory")
 
         expect(() => parseEnv()).toThrow(ZodError)
     })

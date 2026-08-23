@@ -20,7 +20,7 @@
         "lint": "npx --node-options='--experimental-strip-types' eslint --flag unstable_native_nodejs_ts_config .",
         "lint:fix": "npm run lint -- --fix",
         "lint:report": "npm run lint -- --format html --output-file lint-report.html",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
         "format:write": "npx prettier --write .",
         "format:check": "npx prettier --check .",
         "validate": "npm run typecheck && npm run lint && npm run format:check",
