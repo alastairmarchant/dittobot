@@ -1,4 +1,4 @@
-FROM node:24-trixie-slim AS build
+FROM node:26-trixie-slim AS build
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY src ./src
 RUN npm run build
 
 
-FROM node:24-trixie-slim AS development
+FROM node:26-trixie-slim AS development
 
 ENV NODE_ENV=development
 WORKDIR /app
@@ -48,7 +48,7 @@ ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "start"]
 
 
-FROM node:24-trixie-slim AS production
+FROM node:26-trixie-slim AS production
 
 ENV NODE_ENV=production
 WORKDIR /app
