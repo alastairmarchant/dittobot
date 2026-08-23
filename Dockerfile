@@ -16,7 +16,7 @@ ENV NODE_ENV=development
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends curl=8.14.1-2+deb13u3 dumb-init=1.2.5-3 \
+	&& apt-get install -y --no-install-recommends curl dumb-init \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
@@ -54,7 +54,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends curl=8.14.1-2+deb13u3 dumb-init=1.2.5-3 \
+	&& apt-get install -y --no-install-recommends curl dumb-init \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
