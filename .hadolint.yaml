@@ -1,0 +1,8 @@
+# See: https://github.com/hadolint/hadolint#configure
+
+ignored:
+    # DL3008 asks for pinned apt package versions. Debian point releases
+    # supersede those pins and break the image build, so `curl` and
+    # `dumb-init` are installed unpinned on purpose. Reproducibility comes
+    # from the pinned `node:26-trixie-slim` base image instead.
+    - DL3008

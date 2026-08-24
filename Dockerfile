@@ -31,7 +31,7 @@ COPY .dockerignore ./
 RUN mkdir -p /data \
 	&& chown -R node:node /app /data
 
-USER node
+USER 1000:1000
 
 EXPOSE 3000
 VOLUME ["/data"]
@@ -42,7 +42,7 @@ ENV DITTOBOT_STORE__PATH=/data
 RUN npm run build
 COPY app.yml ./app.yml
 
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD curl --fail http://localhost:3000/ping || exit 1
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD ["curl", "--fail", "http://localhost:3000/ping"]
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "start"]
@@ -67,7 +67,7 @@ COPY app.yml ./app.yml
 RUN mkdir -p /data \
 	&& chown -R node:node /app /data
 
-USER node
+USER 1000:1000
 
 EXPOSE 3000
 VOLUME ["/data"]
@@ -75,7 +75,7 @@ VOLUME ["/data"]
 ENV DITTOBOT_STORE__TYPE=local
 ENV DITTOBOT_STORE__PATH=/data
 
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD curl --fail http://localhost:3000/ping || exit 1
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD ["curl", "--fail", "http://localhost:3000/ping"]
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "start"]

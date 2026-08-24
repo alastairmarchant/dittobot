@@ -2,6 +2,12 @@
 
 compact: true
 quiet: true
+skip-check:
+    # CKV_GHA_7 requires `workflow_dispatch` inputs to be empty. The `Version
+    # Bump` workflow deliberately takes a `bump` input, which is a fixed set of
+    # choices that only selects a version level and cannot influence the build
+    # output.
+    - CKV_GHA_7
 skip-path:
     - coverage
     - node_modules

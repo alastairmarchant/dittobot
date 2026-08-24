@@ -41,6 +41,11 @@ jobs:
               id: install
               run: npm ci
 
+            # ESLint and Prettier are disabled here because the `Continuous
+            # Integration` workflow already runs them via `npm run lint` and
+            # `npm run format:check`, using the versions pinned in
+            # `package.json`. Super-linter bundles its own, older copies, which
+            # disagree with ours about formatting.
             - name: Lint Codebase
               id: super-linter
               uses: super-linter/super-linter/slim@v8
@@ -56,7 +61,9 @@ jobs:
                   VALIDATE_BIOME_LINT: false
                   VALIDATE_GITHUB_ACTIONS_ZIZMOR: false
                   VALIDATE_JAVASCRIPT_ES: false
+                  VALIDATE_JAVASCRIPT_PRETTIER: false
                   VALIDATE_JSCPD: false
                   VALIDATE_TYPESCRIPT_ES: false
+                  VALIDATE_TYPESCRIPT_PRETTIER: false
                   VALIDATE_JSON: false
                   DOTENV_LINTER_IGNORE_CHECKS: UnorderedKey
