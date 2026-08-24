@@ -84,8 +84,7 @@ export default (app: Probot): void => {
         }
 
         const pr = context.payload.check_suite.pull_requests[0] as
-            | { number: number; head: { ref: string } }
-            | undefined
+            { number: number; head: { ref: string } } | undefined
         if (!pr) {
             return
         }
