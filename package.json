@@ -45,6 +45,8 @@
         "@eslint/js": "^10.0.1",
         "@types/node": "^26.2.0",
         "@vitest/coverage-v8": "^4.1.11",
+        "conventional-changelog-conventionalcommits": "^10.4.0",
+        "conventional-recommended-bump": "^12.1.0",
         "eslint": "^10.9.0",
         "eslint-config-prettier": "^10.1.8",
         "globals": "^17.11.0",

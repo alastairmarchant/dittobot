@@ -1,0 +1,123 @@
+# This workflow bumps the version in `package.json` and pushes the result to
+# `main`, where the `Release` workflow picks it up and tags, publishes and
+# releases it.
+#
+# The push uses `RELEASE_TOKEN` rather than `GITHUB_TOKEN` for two reasons: the
+# `main` ruleset only grants bypass to the repository admin role, and GitHub
+# does not trigger workflows for refs pushed with `GITHUB_TOKEN`, so `Release`
+# would never run.
+name: Version Bump
+
+on:
+    workflow_dispatch:
+        inputs:
+            bump:
+                description: >
+                    Version bump level. "auto" derives the level from the
+                    conventional commits made since the last release.
+                type: choice
+                options:
+                    - auto
+                    - patch
+                    - minor
+                    - major
+                default: auto
+
+permissions:
+    contents: read
+
+concurrency:
+    group: version-bump
+    cancel-in-progress: false
+
+jobs:
+    bump:
+        name: Bump Version
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Check Branch
+              id: check-branch
+              if: github.ref != 'refs/heads/main'
+              run: |
+                  echo "::error::This workflow must be run from the main branch."
+                  exit 1
+
+            - name: Checkout
+              id: checkout
+              uses: actions/checkout@v7
+              with:
+                  # The bump level is derived from every commit since the last
+                  # release tag, so the full history and the tags are needed.
+                  fetch-depth: 0
+                  fetch-tags: true
+                  token: ${{ secrets.RELEASE_TOKEN }}
+
+            - name: Setup Node.js
+              id: setup-node
+              uses: actions/setup-node@v6
+              with:
+                  node-version-file: .node-version
+                  cache: npm
+
+            - name: Install Dependencies
+              id: npm-ci
+              run: npm ci
+
+            - name: Determine Bump Level
+              id: bump-level
+              env:
+                  BUMP: ${{ inputs.bump }}
+              run: |
+                  if [ "$BUMP" = "auto" ]; then
+                      LEVEL="$(npx conventional-recommended-bump -p conventionalcommits)"
+                  else
+                      LEVEL="$BUMP"
+                  fi
+
+                  echo "level=${LEVEL:-patch}" >> "$GITHUB_OUTPUT"
+
+            - name: Bump Version
+              id: bump-version
+              env:
+                  LEVEL: ${{ steps.bump-level.outputs.level }}
+              run: |
+                  PREVIOUS="$(npm pkg get version | tr -d '"')"
+
+                  # Tagging is left to the `Release` workflow.
+                  npm version --no-git-tag-version "$LEVEL"
+
+                  {
+                      echo "previous=$PREVIOUS"
+                      echo "version=$(npm pkg get version | tr -d '"')"
+                  } >> "$GITHUB_OUTPUT"
+
+            - name: Commit and Push
+              id: commit
+              env:
+                  HUSKY: 0
+                  VERSION: ${{ steps.bump-version.outputs.version }}
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email \
+                      "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add package.json package-lock.json
+                  git commit -m "chore(release): v$VERSION"
+                  git push origin HEAD:main
+
+            - name: Write Summary
+              id: summary
+              env:
+                  LEVEL: ${{ steps.bump-level.outputs.level }}
+                  PREVIOUS: ${{ steps.bump-version.outputs.previous }}
+                  VERSION: ${{ steps.bump-version.outputs.version }}
+              run: |
+                  {
+                      echo "### Version bumped to \`v$VERSION\`"
+                      echo ""
+                      echo "| | |"
+                      echo "| --- | --- |"
+                      echo "| Level | \`$LEVEL\` |"
+                      echo "| Previous | \`$PREVIOUS\` |"
+                      echo "| New | \`$VERSION\` |"
+                  } >> "$GITHUB_STEP_SUMMARY"
