@@ -51,7 +51,7 @@
         "eslint-config-prettier": "^10.1.8",
         "globals": "^17.11.0",
         "husky": "^9.1.7",
-        "ioredis": "^5.11.1",
+        "ioredis": "^6.0.0",
         "json-schema-faker": "^0.6.3",
         "lint-staged": "^17.3.0",
         "nock": "^14.0.17",
